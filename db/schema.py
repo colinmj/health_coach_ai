@@ -95,6 +95,40 @@ SELECT
 FROM ranked WHERE rn = 1
 ORDER BY exercise_template_id, start_time;
 
+CREATE TABLE IF NOT EXISTS recovery (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    whoop_cycle_id       TEXT    UNIQUE NOT NULL,
+    date                 TEXT    NOT NULL,  -- YYYY-MM-DD, for cross-domain joins
+    score_state          TEXT,              -- SCORED | PENDING_SCORE | UNSCORABLE
+    recovery_score       REAL,
+    hrv_rmssd_milli      REAL,
+    resting_heart_rate   REAL,
+    spo2_percentage      REAL,
+    skin_temp_celsius    REAL,
+    synced_at            TEXT    DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sleep (
+    id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+    whoop_sleep_id                TEXT    UNIQUE NOT NULL,
+    whoop_cycle_id                TEXT,   -- links to recovery.whoop_cycle_id
+    date                          TEXT    NOT NULL,  -- DATE(start), YYYY-MM-DD
+    is_nap                        INTEGER NOT NULL DEFAULT 0,
+    score_state                   TEXT,
+    start_time                    TEXT,
+    end_time                      TEXT,
+    total_in_bed_time_milli       INTEGER,
+    total_awake_time_milli        INTEGER,
+    total_light_sleep_milli       INTEGER,
+    total_slow_wave_sleep_milli   INTEGER,
+    total_rem_sleep_milli         INTEGER,
+    disturbance_count             INTEGER,
+    sleep_performance_percentage  REAL,
+    sleep_efficiency_percentage   REAL,
+    respiratory_rate              REAL,
+    synced_at                     TEXT    DEFAULT (datetime('now'))
+);
+
 CREATE VIEW IF NOT EXISTS v_workout_performance AS
 SELECT
     w.hevy_id          AS workout_hevy_id,
