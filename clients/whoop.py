@@ -89,7 +89,7 @@ class WhoopClient:
             params["start"] = start
         if end:
             params["end"] = end
-        yield from self._iter_collection("/v2/cycle", params)
+        yield from self._iter_collection("/developer/v2/cycle", params)
 
     def iter_sleep(self, start: str | None = None, end: str | None = None) -> Iterator[dict]:
         """Yield all sleep records (excludes naps by default — filtered in sync)."""
@@ -98,7 +98,7 @@ class WhoopClient:
             params["start"] = start
         if end:
             params["end"] = end
-        yield from self._iter_collection("/v2/activity/sleep", params)
+        yield from self._iter_collection("/developer/v2/activity/sleep", params)
 
     def __enter__(self) -> "WhoopClient":
         return self

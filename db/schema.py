@@ -129,6 +129,21 @@ CREATE TABLE IF NOT EXISTS sleep (
     synced_at                     TEXT    DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS body_measurements (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    withings_group_id INTEGER UNIQUE NOT NULL,   -- grpid from API
+    measured_at       TEXT    NOT NULL,           -- ISO-8601 from Unix epoch
+    date              TEXT    NOT NULL,           -- YYYY-MM-DD for cross-domain joins
+    weight_kg         REAL,
+    fat_free_mass_kg  REAL,
+    fat_ratio         REAL,   -- body fat %
+    fat_mass_kg       REAL,
+    muscle_mass_kg    REAL,
+    hydration_kg      REAL,
+    bone_mass_kg      REAL,
+    synced_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE VIEW IF NOT EXISTS v_workout_performance AS
 SELECT
     w.hevy_id          AS workout_hevy_id,

@@ -1,11 +1,11 @@
-"""One-time Whoop OAuth2 authorisation flow.
+"""One-time Withings OAuth2 authorisation flow.
 
 Run:
-    python -m sync.whoop_auth
+    python -m sync.withings_auth
 
-Opens your browser, catches the callback on localhost:8484, exchanges the
-code for tokens, and writes WHOOP_ACCESS_TOKEN / WHOOP_REFRESH_TOKEN into
-your .env file.  Re-run only if both tokens become invalid.
+Opens your browser, catches the callback on localhost:8585, exchanges the
+code for tokens, and writes WITHINGS_ACCESS_TOKEN / WITHINGS_REFRESH_TOKEN
+into your .env file.  Re-run only if both tokens become invalid.
 """
 
 import os
@@ -22,9 +22,9 @@ from dotenv import load_dotenv, set_key
 load_dotenv()
 
 _ENV_PATH = Path(".env")
-_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
-_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
-_SCOPES = "offline read:cycles read:recovery read:sleep"
+_AUTH_URL = "https://account.withings.com/oauth2_user/authorize2"
+_TOKEN_URL = "https://wbsapi.withings.net/v2/oauth2"
+_SCOPES = "user.metrics"
 
 
 def _build_auth_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -42,6 +42,7 @@ def _exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: 
     resp = httpx.post(
         _TOKEN_URL,
         data={
+            "action": "requesttoken",
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -50,13 +51,16 @@ def _exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: 
         },
     )
     resp.raise_for_status()
-    return resp.json()
+    body = resp.json()
+    if body.get("status") != 0:
+        raise RuntimeError(f"Token exchange failed: {body}")
+    return body["body"]
 
 
 def run() -> None:
-    client_id = os.environ["WHOOP_CLIENT_ID"]
-    client_secret = os.environ["WHOOP_CLIENT_SECRET"]
-    redirect_uri = os.environ.get("WHOOP_REDIRECT_URI", "http://localhost:8484/callback")
+    client_id = os.environ["WITHINGS_CLIENT_ID"]
+    client_secret = os.environ["WITHINGS_CLIENT_SECRET"]
+    redirect_uri = os.environ.get("WITHINGS_REDIRECT_URI", "http://localhost:8585/callback")
 
     state = secrets.token_urlsafe(16)
     received_code: list[str] = []
@@ -79,10 +83,9 @@ def run() -> None:
         def log_message(self, *_) -> None:
             pass  # suppress request logs
 
-    port = int(urllib.parse.urlparse(redirect_uri).port or 8484)
+    port = int(urllib.parse.urlparse(redirect_uri).port or 8585)
     server = HTTPServer(("localhost", port), Handler)
 
-    # Shut down after the first successful request
     def _serve():
         server.handle_request()
 
@@ -90,7 +93,7 @@ def run() -> None:
     thread.start()
 
     auth_url = _build_auth_url(client_id, redirect_uri, state)
-    print(f"Opening browser for Whoop authorisation…\n{auth_url}\n")
+    print(f"Opening browser for Withings authorisation…\n{auth_url}\n")
     webbrowser.open(auth_url)
 
     thread.join(timeout=120)
@@ -101,9 +104,9 @@ def run() -> None:
     print("Exchanging code for tokens…")
     tokens = _exchange_code(received_code[0], client_id, client_secret, redirect_uri)
 
-    set_key(_ENV_PATH, "WHOOP_ACCESS_TOKEN", tokens["access_token"])
-    set_key(_ENV_PATH, "WHOOP_REFRESH_TOKEN", tokens["refresh_token"])
-    print("Tokens saved to .env. You can now run: python -m sync.whoop")
+    set_key(_ENV_PATH, "WITHINGS_ACCESS_TOKEN", tokens["access_token"])
+    set_key(_ENV_PATH, "WITHINGS_REFRESH_TOKEN", tokens["refresh_token"])
+    print("Tokens saved to .env. You can now run: python -m sync.withings")
 
 
 if __name__ == "__main__":

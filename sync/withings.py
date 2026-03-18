@@ -1,0 +1,103 @@
+"""Sync Withings body composition data into SQLite.
+
+Run:
+    python -m sync.withings
+
+Each run is idempotent. Requires WITHINGS_ACCESS_TOKEN and WITHINGS_REFRESH_TOKEN
+in .env — run `python -m sync.withings_auth` first if they are missing.
+"""
+
+import os
+import sqlite3
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+from clients.withings import WithingsClient
+from db.schema import get_connection, init_db
+
+load_dotenv()
+
+# Maps Withings measure type codes to body_measurements column names
+MEASURE_TYPES = {
+    1:  "weight_kg",
+    5:  "fat_free_mass_kg",
+    6:  "fat_ratio",
+    8:  "fat_mass_kg",
+    76: "muscle_mass_kg",
+    77: "hydration_kg",
+    88: "bone_mass_kg",
+}
+
+
+def _decode(value: int, unit: int) -> float:
+    """Convert Withings fixed-point value: real = value × 10^unit."""
+    return value * (10 ** unit)
+
+
+def _upsert_measurement(grp: dict, conn: sqlite3.Connection) -> None:
+    """Insert or replace a body_measurements row from a measuregrp dict."""
+    grp_id = grp["grpid"]
+    unix_ts = grp["date"]
+
+    dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+    measured_at = dt.isoformat()
+    date = dt.strftime("%Y-%m-%d")
+
+    # Map measure list to column values; unmeasured columns stay None
+    columns: dict[str, float | None] = {col: None for col in MEASURE_TYPES.values()}
+    for m in grp.get("measures", []):
+        col = MEASURE_TYPES.get(m["type"])
+        if col is not None:
+            columns[col] = _decode(m["value"], m["unit"])
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO body_measurements
+            (withings_group_id, measured_at, date,
+             weight_kg, fat_free_mass_kg, fat_ratio, fat_mass_kg,
+             muscle_mass_kg, hydration_kg, bone_mass_kg)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            grp_id,
+            measured_at,
+            date,
+            columns["weight_kg"],
+            columns["fat_free_mass_kg"],
+            columns["fat_ratio"],
+            columns["fat_mass_kg"],
+            columns["muscle_mass_kg"],
+            columns["hydration_kg"],
+            columns["bone_mass_kg"],
+        ),
+    )
+
+
+def sync_withings() -> None:
+    init_db()
+
+    print("Fetching body measurements from Withings…")
+    with WithingsClient(
+        client_id=os.environ["WITHINGS_CLIENT_ID"],
+        client_secret=os.environ["WITHINGS_CLIENT_SECRET"],
+        access_token=os.environ["WITHINGS_ACCESS_TOKEN"],
+        refresh_token=os.environ["WITHINGS_REFRESH_TOKEN"],
+    ) as client:
+        # Collect all groups then sort oldest-first for consistency
+        grps = list(client.iter_body_measurements())
+
+    grps.sort(key=lambda g: g["date"])
+    print(f"  {len(grps)} measurement groups found")
+
+    with get_connection() as conn:
+        for grp in grps:
+            _upsert_measurement(grp, conn)
+        conn.commit()
+
+    print(f"Body measurements synced: {len(grps)} rows")
+    print("Withings sync complete.")
+
+
+if __name__ == "__main__":
+    sync_withings()
