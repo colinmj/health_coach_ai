@@ -1,0 +1,139 @@
+import sqlite3
+from pathlib import Path
+
+DB_PATH = Path("health_coach.db")
+
+_CREATE_TABLES = """
+CREATE TABLE IF NOT EXISTS workouts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    hevy_id     TEXT    UNIQUE NOT NULL,
+    title       TEXT,
+    start_time  TEXT,
+    end_time    TEXT,
+    synced_at   TEXT    DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS exercises (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    workout_id           INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_template_id TEXT,
+    title                TEXT NOT NULL,
+    notes                TEXT,
+    exercise_index       INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS sets (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    exercise_id      INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+    set_index        INTEGER,
+    set_type         TEXT,
+    weight_kg        REAL,
+    reps             INTEGER,
+    duration_seconds INTEGER,
+    distance_meters  REAL,
+    rpe              REAL,
+    estimated_1rm    REAL,
+    performance_tag  TEXT    -- PR | Better | Neutral | Worse
+);
+
+CREATE VIEW IF NOT EXISTS v_exercise_prs AS
+WITH working_sets AS (
+    SELECT
+        s.estimated_1rm, s.weight_kg, s.reps,
+        e.exercise_template_id, e.title AS exercise_title,
+        w.hevy_id AS workout_hevy_id, w.title AS workout_title, w.start_time
+    FROM sets s
+    JOIN exercises e ON s.exercise_id = e.id
+    JOIN workouts  w ON e.workout_id  = w.id
+    WHERE s.estimated_1rm IS NOT NULL
+      AND (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
+),
+ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY exercise_template_id
+        ORDER BY estimated_1rm DESC, weight_kg DESC, start_time ASC
+    ) AS rn
+    FROM working_sets
+)
+SELECT
+    exercise_template_id, exercise_title,
+    estimated_1rm  AS pr_1rm_kg,
+    weight_kg      AS pr_weight_kg,
+    reps           AS pr_reps,
+    workout_hevy_id, workout_title,
+    start_time     AS pr_date
+FROM ranked WHERE rn = 1
+ORDER BY pr_1rm_kg DESC;
+
+CREATE VIEW IF NOT EXISTS v_workout_1rm AS
+WITH working_sets AS (
+    SELECT
+        s.estimated_1rm, s.weight_kg, s.reps, s.set_index,
+        e.exercise_template_id, e.title AS exercise_title,
+        w.id AS workout_id, w.hevy_id AS workout_hevy_id,
+        w.title AS workout_title, w.start_time
+    FROM sets s
+    JOIN exercises e ON s.exercise_id = e.id
+    JOIN workouts  w ON e.workout_id  = w.id
+    WHERE s.estimated_1rm IS NOT NULL
+      AND (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
+),
+ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY workout_id, exercise_template_id
+        ORDER BY estimated_1rm DESC, weight_kg DESC, set_index ASC
+    ) AS rn
+    FROM working_sets
+)
+SELECT
+    workout_hevy_id, workout_title,
+    start_time            AS workout_date,
+    exercise_template_id, exercise_title,
+    estimated_1rm         AS session_best_1rm_kg,
+    weight_kg             AS best_set_weight_kg,
+    reps                  AS best_set_reps
+FROM ranked WHERE rn = 1
+ORDER BY exercise_template_id, start_time;
+
+CREATE VIEW IF NOT EXISTS v_workout_performance AS
+SELECT
+    w.hevy_id          AS workout_hevy_id,
+    w.title            AS workout_title,
+    DATE(w.start_time) AS workout_date,
+    w.start_time,
+    COUNT(s.id)        AS total_sets,
+    SUM(CASE WHEN s.performance_tag = 'PR'      THEN 1 ELSE 0 END) AS pr_sets,
+    SUM(CASE WHEN s.performance_tag = 'Better'  THEN 1 ELSE 0 END) AS better_sets,
+    SUM(CASE WHEN s.performance_tag = 'Neutral' THEN 1 ELSE 0 END) AS neutral_sets,
+    SUM(CASE WHEN s.performance_tag = 'Worse'   THEN 1 ELSE 0 END) AS worse_sets,
+    ROUND(AVG(CASE
+        WHEN s.performance_tag = 'PR'      THEN 3.0
+        WHEN s.performance_tag = 'Better'  THEN 2.0
+        WHEN s.performance_tag = 'Neutral' THEN 1.0
+        WHEN s.performance_tag = 'Worse'   THEN 0.0
+    END), 2) AS performance_score,
+    CASE
+        WHEN MAX(CASE WHEN s.performance_tag = 'PR'     THEN 3 ELSE 0 END) = 3 THEN 'PR'
+        WHEN MAX(CASE WHEN s.performance_tag = 'Better' THEN 2 ELSE 0 END) = 2 THEN 'Better'
+        WHEN MAX(CASE WHEN s.performance_tag = 'Worse'  THEN 1 ELSE 0 END) = 1 THEN 'Neutral'
+        ELSE 'Worse'
+    END AS best_tag
+FROM workouts w
+JOIN exercises e ON e.workout_id = w.id
+JOIN sets s ON s.exercise_id = e.id
+WHERE (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
+GROUP BY w.id
+ORDER BY w.start_time DESC;
+"""
+
+
+def get_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db() -> None:
+    with get_connection() as conn:
+        conn.executescript(_CREATE_TABLES)
