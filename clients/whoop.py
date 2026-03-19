@@ -91,6 +91,15 @@ class WhoopClient:
             params["end"] = end
         yield from self._iter_collection("/developer/v2/cycle", params)
 
+    def iter_recovery(self, start: str | None = None, end: str | None = None) -> Iterator[dict]:
+        """Yield all recovery records (recovery_score, HRV, RHR, SpO2, skin temp)."""
+        params: dict = {}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        yield from self._iter_collection("/developer/v2/recovery", params)
+
     def iter_sleep(self, start: str | None = None, end: str | None = None) -> Iterator[dict]:
         """Yield all sleep records (excludes naps by default — filtered in sync)."""
         params: dict = {}

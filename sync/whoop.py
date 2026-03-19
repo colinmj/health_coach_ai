@@ -23,19 +23,20 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 def _upsert_recovery(conn: sqlite3.Connection, cycle: dict) -> None:
-    """Insert or update a recovery row from a cycle record."""
-    cycle_id = str(cycle["id"])
+    """Insert or update a recovery row from a recovery record."""
+    cycle_id = str(cycle["cycle_id"])
     recovery = cycle.get("score") or {}
 
-    # Date: use the cycle start time, truncated to calendar day
-    start = cycle.get("start", "")
-    date = start[:10]  # YYYY-MM-DD
+    # Date: use created_at, truncated to calendar day
+    created_at = cycle.get("created_at", "")
+    date = created_at[:10]  # YYYY-MM-DD
 
     score_state = cycle.get("score_state")
 
     existing = conn.execute(
         "SELECT id FROM recovery WHERE whoop_cycle_id = ?", (cycle_id,)
     ).fetchone()
+
 
     if existing:
         conn.execute(
@@ -154,9 +155,9 @@ def sync_whoop() -> None:
         access_token=os.environ["WHOOP_ACCESS_TOKEN"],
         refresh_token=os.environ["WHOOP_REFRESH_TOKEN"],
     ) as client:
-        print("Fetching recovery (cycles)…")
-        cycles = list(client.iter_cycles())
-        print(f"  {len(cycles)} cycles found")
+        print("Fetching recovery…")
+        cycles = list(client.iter_recovery())
+        print(f"  {len(cycles)} recovery records found")
 
         print("Fetching sleep…")
         sleeps = list(client.iter_sleep())
