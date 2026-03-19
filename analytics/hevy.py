@@ -70,8 +70,8 @@ def get_exercise_template_ids() -> list[dict]:
             e.exercise_template_id,
             e.title AS exercise_title,
             COUNT(DISTINCT w.id) AS session_count
-        FROM exercises e
-        JOIN workouts w ON e.workout_id = w.id
+        FROM hevy_exercises e
+        JOIN hevy_workouts w ON e.workout_id = w.id
         WHERE e.exercise_template_id IS NOT NULL
         GROUP BY e.exercise_template_id, e.title
         ORDER BY session_count DESC, e.title

@@ -3,3 +3,4 @@ python-dotenv==1.0.1
 langchain-core
 langchain-anthropic
 langgraph
+pytest

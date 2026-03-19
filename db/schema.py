@@ -4,7 +4,7 @@ from pathlib import Path
 DB_PATH = Path("health_coach.db")
 
 _CREATE_TABLES = """
-CREATE TABLE IF NOT EXISTS workouts (
+CREATE TABLE IF NOT EXISTS hevy_workouts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     hevy_id     TEXT    UNIQUE NOT NULL,
     title       TEXT,
@@ -13,18 +13,18 @@ CREATE TABLE IF NOT EXISTS workouts (
     synced_at   TEXT    DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS exercises (
+CREATE TABLE IF NOT EXISTS hevy_exercises (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    workout_id           INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    workout_id           INTEGER NOT NULL REFERENCES hevy_workouts(id) ON DELETE CASCADE,
     exercise_template_id TEXT,
     title                TEXT NOT NULL,
     notes                TEXT,
     exercise_index       INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS sets (
+CREATE TABLE IF NOT EXISTS hevy_sets (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    exercise_id      INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+    exercise_id      INTEGER NOT NULL REFERENCES hevy_exercises(id) ON DELETE CASCADE,
     set_index        INTEGER,
     set_type         TEXT,
     weight_kg        REAL,
@@ -42,9 +42,9 @@ WITH working_sets AS (
         s.estimated_1rm, s.weight_kg, s.reps,
         e.exercise_template_id, e.title AS exercise_title,
         w.hevy_id AS workout_hevy_id, w.title AS workout_title, w.start_time
-    FROM sets s
-    JOIN exercises e ON s.exercise_id = e.id
-    JOIN workouts  w ON e.workout_id  = w.id
+    FROM hevy_sets s
+    JOIN hevy_exercises e ON s.exercise_id = e.id
+    JOIN hevy_workouts  w ON e.workout_id  = w.id
     WHERE s.estimated_1rm IS NOT NULL
       AND (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
 ),
@@ -72,9 +72,9 @@ WITH working_sets AS (
         e.exercise_template_id, e.title AS exercise_title,
         w.id AS workout_id, w.hevy_id AS workout_hevy_id,
         w.title AS workout_title, w.start_time
-    FROM sets s
-    JOIN exercises e ON s.exercise_id = e.id
-    JOIN workouts  w ON e.workout_id  = w.id
+    FROM hevy_sets s
+    JOIN hevy_exercises e ON s.exercise_id = e.id
+    JOIN hevy_workouts  w ON e.workout_id  = w.id
     WHERE s.estimated_1rm IS NOT NULL
       AND (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
 ),
@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS recovery (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     whoop_cycle_id       TEXT    UNIQUE NOT NULL,
     date                 TEXT    NOT NULL,  -- YYYY-MM-DD, for cross-domain joins
+    source               TEXT    NOT NULL DEFAULT 'whoop',
     score_state          TEXT,              -- SCORED | PENDING_SCORE | UNSCORABLE
     recovery_score       REAL,
     hrv_rmssd_milli      REAL,
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS sleep (
     whoop_sleep_id                TEXT    UNIQUE NOT NULL,
     whoop_cycle_id                TEXT,   -- links to recovery.whoop_cycle_id
     date                          TEXT    NOT NULL,  -- DATE(start), YYYY-MM-DD
+    source                        TEXT    NOT NULL DEFAULT 'whoop',
     is_nap                        INTEGER NOT NULL DEFAULT 0,
     score_state                   TEXT,
     start_time                    TEXT,
@@ -134,6 +136,7 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     withings_group_id INTEGER UNIQUE NOT NULL,   -- grpid from API
     measured_at       TEXT    NOT NULL,           -- ISO-8601 from Unix epoch
     date              TEXT    NOT NULL,           -- YYYY-MM-DD for cross-domain joins
+    source            TEXT    NOT NULL DEFAULT 'withings',
     weight_kg         REAL,
     fat_free_mass_kg  REAL,
     fat_ratio         REAL,   -- body fat %
@@ -167,9 +170,9 @@ SELECT
         WHEN MAX(CASE WHEN s.performance_tag = 'Worse'  THEN 1 ELSE 0 END) = 1 THEN 'Neutral'
         ELSE 'Worse'
     END AS best_tag
-FROM workouts w
-JOIN exercises e ON e.workout_id = w.id
-JOIN sets s ON s.exercise_id = e.id
+FROM hevy_workouts w
+JOIN hevy_exercises e ON e.workout_id = w.id
+JOIN hevy_sets s ON s.exercise_id = e.id
 WHERE (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
 GROUP BY w.id
 ORDER BY w.start_time DESC;

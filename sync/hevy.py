@@ -41,9 +41,9 @@ def _prev_session_best_1rm(
     row = conn.execute(
         """
         SELECT MAX(s.estimated_1rm)
-        FROM sets s
-        JOIN exercises e ON s.exercise_id = e.id
-        JOIN workouts w  ON e.workout_id  = w.id
+        FROM hevy_sets s
+        JOIN hevy_exercises e ON s.exercise_id = e.id
+        JOIN hevy_workouts w  ON e.workout_id  = w.id
         WHERE e.exercise_template_id = ?
           AND w.start_time < ?
         """,
@@ -61,9 +61,9 @@ def _all_time_best_1rm(
     row = conn.execute(
         """
         SELECT MAX(s.estimated_1rm)
-        FROM sets s
-        JOIN exercises e ON s.exercise_id = e.id
-        JOIN workouts w  ON e.workout_id  = w.id
+        FROM hevy_sets s
+        JOIN hevy_exercises e ON s.exercise_id = e.id
+        JOIN hevy_workouts w  ON e.workout_id  = w.id
         WHERE e.exercise_template_id = ?
           AND w.hevy_id != ?
         """,
@@ -101,18 +101,18 @@ def tag_performance(
 def _upsert_workout(conn: sqlite3.Connection, workout: dict) -> int:
     hevy_id = workout["id"]
     row = conn.execute(
-        "SELECT id FROM workouts WHERE hevy_id = ?", (hevy_id,)
+        "SELECT id FROM hevy_workouts WHERE hevy_id = ?", (hevy_id,)
     ).fetchone()
 
     if row:
         conn.execute(
-            "UPDATE workouts SET title=?, start_time=?, end_time=? WHERE id=?",
+            "UPDATE hevy_workouts SET title=?, start_time=?, end_time=? WHERE id=?",
             (workout.get("title"), workout.get("start_time"), workout.get("end_time"), row[0]),
         )
         return row[0]
 
     cursor = conn.execute(
-        "INSERT INTO workouts (hevy_id, title, start_time, end_time) VALUES (?,?,?,?)",
+        "INSERT INTO hevy_workouts (hevy_id, title, start_time, end_time) VALUES (?,?,?,?)",
         (hevy_id, workout.get("title"), workout.get("start_time"), workout.get("end_time")),
     )
     return cursor.lastrowid
@@ -127,14 +127,14 @@ def _insert_exercises_and_sets(
     start_time = workout.get("start_time", "")
 
     # Wipe and re-insert so sets are always fresh (handles edited workouts)
-    conn.execute("DELETE FROM exercises WHERE workout_id = ?", (workout_db_id,))
+    conn.execute("DELETE FROM hevy_exercises WHERE workout_id = ?", (workout_db_id,))
 
     for ex in workout.get("exercises", []):
         template_id = ex.get("exercise_template_id")
 
         cursor = conn.execute(
             """
-            INSERT INTO exercises (workout_id, exercise_template_id, title, notes, exercise_index)
+            INSERT INTO hevy_exercises (workout_id, exercise_template_id, title, notes, exercise_index)
             VALUES (?,?,?,?,?)
             """,
             (workout_db_id, template_id, ex.get("title"), ex.get("notes"), ex.get("index")),
@@ -151,7 +151,7 @@ def _insert_exercises_and_sets(
 
             conn.execute(
                 """
-                INSERT INTO sets
+                INSERT INTO hevy_sets
                     (exercise_id, set_index, set_type, weight_kg, reps,
                      duration_seconds, distance_meters, rpe, estimated_1rm, performance_tag)
                 VALUES (?,?,?,?,?,?,?,?,?,?)

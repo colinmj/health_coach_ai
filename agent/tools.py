@@ -4,7 +4,12 @@ from langchain_core.tools import tool
 import analytics.hevy as hevy
 import analytics.whoop as whoop
 import analytics.withings as withings
+import analytics.correlations as corr
 
+
+# ---------------------------------------------------------------------------
+# Strength tools  (domain: "strength")
+# ---------------------------------------------------------------------------
 
 @tool
 def get_exercise_prs(exercise_template_id: str = "") -> str:
@@ -58,6 +63,10 @@ def get_exercise_list() -> str:
     return json.dumps(hevy.get_exercise_template_ids())
 
 
+# ---------------------------------------------------------------------------
+# Recovery tools  (domain: "recovery")
+# ---------------------------------------------------------------------------
+
 @tool
 def get_recovery(since: str = "", until: str = "") -> str:
     """Return Whoop recovery scores and HRV data.
@@ -84,6 +93,10 @@ def get_sleep(since: str = "", until: str = "", exclude_naps: bool = True) -> st
     ))
 
 
+# ---------------------------------------------------------------------------
+# Body composition tools  (domain: "body_composition")
+# ---------------------------------------------------------------------------
+
 @tool
 def get_body_composition(since: str = "", until: str = "") -> str:
     """Return Withings body composition measurements (weight, fat %, muscle mass, etc.).
@@ -96,12 +109,124 @@ def get_body_composition(since: str = "", until: str = "") -> str:
     ))
 
 
-TOOLS = [
-    get_exercise_prs,
-    get_workout_1rm_history,
-    get_workout_performance,
-    get_exercise_list,
-    get_recovery,
-    get_sleep,
-    get_body_composition,
+# ---------------------------------------------------------------------------
+# Correlation tools  (domain pairs — all domains they touch)
+# ---------------------------------------------------------------------------
+
+@tool
+def get_hrv_vs_performance(since: str = "", until: str = "") -> str:
+    """Use for 'does HRV predict workout quality?' questions.
+    Returns paired prior-night recovery data with each workout's performance score.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: workout_date, workout_title, performance_score,
+    best_tag, total_sets, prior_night_recovery_score, prior_night_hrv_milli, prior_night_rhr."""
+    return json.dumps(corr.get_hrv_vs_performance(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_sleep_vs_performance(since: str = "", until: str = "") -> str:
+    """Use for 'does sleep quality affect training?' questions. Sleep durations are in minutes.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: workout_date, workout_title, performance_score,
+    best_tag, prior_night_sleep_performance, prior_night_sleep_efficiency,
+    prior_night_sws_minutes, prior_night_rem_minutes, prior_night_in_bed_minutes."""
+    return json.dumps(corr.get_sleep_vs_performance(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_sleep_threshold_vs_performance(
+    threshold_hours: str = "7",
+    since: str = "",
+    until: str = "",
+) -> str:
+    """Use for 'does sleeping more/less than X hours affect workout performance?' questions.
+    Compares average performance score and PR rate for workouts preceded by nights above vs
+    below the threshold. Returns two summary rows (above_threshold / below_threshold) with
+    workout_count, avg_performance_score, avg_sleep_minutes, pr_workouts, better_workouts,
+    worse_workouts. Default threshold is 7 hours."""
+    return json.dumps(corr.get_sleep_threshold_vs_performance(
+        threshold_hours=float(threshold_hours) if threshold_hours.strip() else 7.0,
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_body_composition_vs_strength(
+    since: str = "",
+    until: str = "",
+    days_window: str = "7",
+) -> str:
+    """Use for 'does body fat change track with strength?' questions.
+    days_window controls how many days after a measurement to look for a workout.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: measurement_date, weight_kg, fat_ratio,
+    muscle_mass_kg, fat_free_mass_kg, nearest_workout_date,
+    avg_1rm_kg_across_exercises, exercises_tracked."""
+    return json.dumps(corr.get_body_composition_vs_strength(
+        since=since.strip() or None,
+        until=until.strip() or None,
+        days_window=int(days_window) if days_window.strip() else 7,
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Registry — maps each tool to the domains and sources it requires.
+#
+# required_domains: the tool is excluded if any of these domains are not active.
+# required_sources: the tool is excluded if the active source for a domain
+#                   doesn't match. Omit a domain here to accept any source.
+#
+# Example: get_workout_performance requires strength=hevy because it relies on
+# Hevy's performance tagging (PR/Better/Neutral/Worse). A Strong user with
+# no equivalent tagging would not receive this tool.
+# ---------------------------------------------------------------------------
+
+TOOL_REGISTRY: list[tuple] = [
+    # (tool_fn,                          required_domains,              required_sources)
+    (get_exercise_prs,                   {"strength"},                  {"strength": "hevy"}),
+    (get_workout_1rm_history,            {"strength"},                  {"strength": "hevy"}),
+    (get_workout_performance,            {"strength"},                  {"strength": "hevy"}),
+    (get_exercise_list,                  {"strength"},                  {"strength": "hevy"}),
+    (get_recovery,                       {"recovery"},                  {}),
+    (get_sleep,                          {"recovery"},                  {}),
+    (get_body_composition,               {"body_composition"},          {}),
+    (get_hrv_vs_performance,             {"recovery", "strength"},      {"strength": "hevy"}),
+    (get_sleep_vs_performance,           {"recovery", "strength"},      {"strength": "hevy"}),
+    (get_sleep_threshold_vs_performance, {"recovery", "strength"},      {"strength": "hevy"}),
+    (get_body_composition_vs_strength,   {"body_composition", "strength"}, {"strength": "hevy"}),
 ]
+
+# Default source map for single-user local mode
+DEFAULT_SOURCES: dict[str, str] = {
+    "strength":        "hevy",
+    "recovery":        "whoop",
+    "body_composition": "withings",
+}
+
+
+def build_tools(source_map: dict[str, str] = DEFAULT_SOURCES) -> list:
+    """Return tools whose required domains and sources are satisfied by source_map.
+
+    source_map maps domain → active source, e.g.:
+        {"strength": "hevy", "recovery": "oura"}
+    Tools requiring a domain not in source_map are excluded.
+    Tools requiring a specific source for a domain are excluded if it doesn't match.
+    """
+    active_domains = set(source_map.keys())
+    return [
+        tool_fn
+        for tool_fn, required_domains, required_sources in TOOL_REGISTRY
+        if required_domains.issubset(active_domains)
+        and all(source_map.get(domain) == source for domain, source in required_sources.items())
+    ]
+
+
+# Default: all tools (single-user local mode)
+TOOLS = build_tools()
