@@ -28,7 +28,7 @@ def get_hrv_vs_performance(
             r.hrv_rmssd_milli  AS prior_night_hrv_milli,
             r.resting_heart_rate AS prior_night_rhr
         FROM v_workout_performance vp
-        JOIN recovery r ON r.date = vp.workout_date - 1
+        JOIN recovery r ON r.date = vp.workout_date - INTERVAL '1 day'
         {where}
         ORDER BY vp.workout_date
     """
@@ -65,7 +65,7 @@ def get_sleep_vs_performance(
             ROUND((sl.total_rem_sleep_milli       / 60000.0)::numeric, 1) AS prior_night_rem_minutes,
             ROUND((sl.total_in_bed_time_milli     / 60000.0)::numeric, 1) AS prior_night_in_bed_minutes
         FROM v_workout_performance vp
-        JOIN sleep sl ON sl.date = vp.workout_date - 1
+        JOIN sleep sl ON sl.date = vp.workout_date - INTERVAL '1 day'
                       AND sl.is_nap = FALSE
                       AND sl.score_state = 'SCORED'
         {where}
@@ -87,7 +87,7 @@ def get_sleep_threshold_vs_performance(
     without computing statistics itself.
     """
     threshold_milli = int(threshold_hours * 3_600_000)
-    params: list = [threshold_milli, threshold_milli]
+    params: list = [threshold_milli]
     date_conditions = []
     if since is not None:
         date_conditions.append("vp.workout_date >= %s")
@@ -95,6 +95,7 @@ def get_sleep_threshold_vs_performance(
     if until is not None:
         date_conditions.append("vp.workout_date <= %s")
         params.append(until)
+    params.append(threshold_milli)  # for ROUND in outer SELECT
 
     where = ("AND " + " AND ".join(date_conditions)) if date_conditions else ""
 
@@ -109,7 +110,7 @@ def get_sleep_threshold_vs_performance(
                     ELSE 'below_threshold'
                 END AS sleep_group
             FROM v_workout_performance vp
-            JOIN sleep sl ON sl.date = vp.workout_date - 1
+            JOIN sleep sl ON sl.date = vp.workout_date - INTERVAL '1 day'
                           AND sl.is_nap = FALSE
                           AND sl.score_state = 'SCORED'
             WHERE sl.total_in_bed_time_milli IS NOT NULL
@@ -308,9 +309,9 @@ def get_carbs_prior_to_prs(
                      + CASE WHEN n3.net_carbs_g IS NOT NULL THEN 1 ELSE 0 END), 0
                   ))::numeric, 1) AS avg_net_carbs_3d
         FROM v_workout_performance vp
-        LEFT JOIN nutrition_daily n1 ON n1.date = vp.workout_date - 1
-        LEFT JOIN nutrition_daily n2 ON n2.date = vp.workout_date - 2
-        LEFT JOIN nutrition_daily n3 ON n3.date = vp.workout_date - 3
+        LEFT JOIN nutrition_daily n1 ON n1.date = vp.workout_date - INTERVAL '1 day'
+        LEFT JOIN nutrition_daily n2 ON n2.date = vp.workout_date - INTERVAL '2 days'
+        LEFT JOIN nutrition_daily n3 ON n3.date = vp.workout_date - INTERVAL '3 days'
         {where}
         ORDER BY vp.workout_date
     """
@@ -345,7 +346,7 @@ def get_nutrition_vs_recovery(
             n.carbs_g             AS prior_day_carbs_g,
             n.fat_g               AS prior_day_fat_g
         FROM recovery r
-        JOIN nutrition_daily n ON n.date = r.date - 1
+        JOIN nutrition_daily n ON n.date = r.date - INTERVAL '1 day'
         {where}
         ORDER BY r.date
     """

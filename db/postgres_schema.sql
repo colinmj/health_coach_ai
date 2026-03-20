@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS sleep (
 CREATE TABLE IF NOT EXISTS body_measurements (
     id                SERIAL      PRIMARY KEY,
     user_id           INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    withings_group_id INTEGER     NOT NULL,
+    withings_group_id BIGINT      NOT NULL,
     measured_at       TIMESTAMPTZ NOT NULL,
     date              DATE        NOT NULL,
     source            TEXT        NOT NULL DEFAULT 'withings',
