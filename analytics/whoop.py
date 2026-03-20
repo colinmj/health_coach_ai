@@ -9,10 +9,10 @@ def get_recovery(
     conditions = []
     params: list = []
     if since is not None:
-        conditions.append("date >= ?")
+        conditions.append("date >= %s")
         params.append(since)
     if until is not None:
-        conditions.append("date <= ?")
+        conditions.append("date <= %s")
         params.append(until)
     sql = """
         SELECT date, recovery_score, hrv_rmssd_milli, resting_heart_rate,
@@ -37,12 +37,12 @@ def get_sleep(
     conditions = []
     params: list = []
     if exclude_naps:
-        conditions.append("is_nap = 0")
+        conditions.append("is_nap = FALSE")
     if since is not None:
-        conditions.append("date >= ?")
+        conditions.append("date >= %s")
         params.append(since)
     if until is not None:
-        conditions.append("date <= ?")
+        conditions.append("date <= %s")
         params.append(until)
     sql = """
         SELECT date, sleep_performance_percentage, sleep_efficiency_percentage,

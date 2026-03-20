@@ -1,4 +1,4 @@
-"""Sync Hevy workouts into SQLite.
+"""Sync Hevy workouts into PostgreSQL.
 
 Run:
     python -m sync.hevy
@@ -9,12 +9,12 @@ accurate at insert time.
 """
 
 import os
-import sqlite3
 
+import psycopg
 from dotenv import load_dotenv
 
 from clients.hevy import HevyClient
-from db.schema import get_connection, init_db
+from db.schema import get_connection, get_local_user_id, init_db
 
 load_dotenv()
 
@@ -33,43 +33,47 @@ def epley_1rm(weight_kg: float, reps: int) -> float | None:
 
 
 def _prev_session_best_1rm(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
     template_id: str,
     before_start_time: str,
+    user_id: int,
 ) -> float | None:
     """Best estimated 1RM for an exercise in the most recent session before this one."""
     row = conn.execute(
         """
-        SELECT MAX(s.estimated_1rm)
+        SELECT MAX(s.estimated_1rm) AS best
         FROM hevy_sets s
         JOIN hevy_exercises e ON s.exercise_id = e.id
         JOIN hevy_workouts w  ON e.workout_id  = w.id
-        WHERE e.exercise_template_id = ?
-          AND w.start_time < ?
+        WHERE e.exercise_template_id = %s
+          AND w.start_time < %s
+          AND w.user_id = %s
         """,
-        (template_id, before_start_time),
+        (template_id, before_start_time, user_id),
     ).fetchone()
-    return row[0] if row else None
+    return row["best"] if row and row["best"] is not None else None
 
 
 def _all_time_best_1rm(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
     template_id: str,
     exclude_hevy_id: str,
+    user_id: int,
 ) -> float | None:
     """All-time best estimated 1RM excluding the current workout."""
     row = conn.execute(
         """
-        SELECT MAX(s.estimated_1rm)
+        SELECT MAX(s.estimated_1rm) AS best
         FROM hevy_sets s
         JOIN hevy_exercises e ON s.exercise_id = e.id
         JOIN hevy_workouts w  ON e.workout_id  = w.id
-        WHERE e.exercise_template_id = ?
-          AND w.hevy_id != ?
+        WHERE e.exercise_template_id = %s
+          AND w.hevy_id != %s
+          AND w.user_id = %s
         """,
-        (template_id, exclude_hevy_id),
+        (template_id, exclude_hevy_id, user_id),
     ).fetchone()
-    return row[0] if row else None
+    return row["best"] if row and row["best"] is not None else None
 
 
 def tag_performance(
@@ -98,52 +102,58 @@ def tag_performance(
 # DB helpers
 # ---------------------------------------------------------------------------
 
-def _upsert_workout(conn: sqlite3.Connection, workout: dict) -> int:
+def _upsert_workout(conn: psycopg.Connection, workout: dict, user_id: int) -> int:
     hevy_id = workout["id"]
     row = conn.execute(
-        "SELECT id FROM hevy_workouts WHERE hevy_id = ?", (hevy_id,)
+        "SELECT id FROM hevy_workouts WHERE hevy_id = %s AND user_id = %s",
+        (hevy_id, user_id),
     ).fetchone()
 
     if row:
         conn.execute(
-            "UPDATE hevy_workouts SET title=?, start_time=?, end_time=? WHERE id=?",
-            (workout.get("title"), workout.get("start_time"), workout.get("end_time"), row[0]),
+            "UPDATE hevy_workouts SET title=%s, start_time=%s, end_time=%s WHERE id=%s",
+            (workout.get("title"), workout.get("start_time"), workout.get("end_time"), row["id"]),
         )
-        return row[0]
+        return row["id"]
 
-    cursor = conn.execute(
-        "INSERT INTO hevy_workouts (hevy_id, title, start_time, end_time) VALUES (?,?,?,?)",
-        (hevy_id, workout.get("title"), workout.get("start_time"), workout.get("end_time")),
-    )
-    return cursor.lastrowid
+    row = conn.execute(
+        """
+        INSERT INTO hevy_workouts (user_id, hevy_id, title, start_time, end_time)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (user_id, hevy_id, workout.get("title"), workout.get("start_time"), workout.get("end_time")),
+    ).fetchone()
+    return row["id"]
 
 
 def _insert_exercises_and_sets(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
     workout_db_id: int,
     workout: dict,
+    user_id: int,
 ) -> None:
     hevy_id = workout["id"]
     start_time = workout.get("start_time", "")
 
     # Wipe and re-insert so sets are always fresh (handles edited workouts)
-    conn.execute("DELETE FROM hevy_exercises WHERE workout_id = ?", (workout_db_id,))
+    conn.execute("DELETE FROM hevy_exercises WHERE workout_id = %s", (workout_db_id,))
 
     for ex in workout.get("exercises", []):
         template_id = ex.get("exercise_template_id")
 
-        cursor = conn.execute(
+        exercise_db_id = conn.execute(
             """
             INSERT INTO hevy_exercises (workout_id, exercise_template_id, title, notes, exercise_index)
-            VALUES (?,?,?,?,?)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (workout_db_id, template_id, ex.get("title"), ex.get("notes"), ex.get("index")),
-        )
-        exercise_db_id = cursor.lastrowid
+        ).fetchone()["id"]
 
         # Baselines for tagging (only workouts already committed to DB)
-        prev_best = _prev_session_best_1rm(conn, template_id, start_time)
-        all_time_best = _all_time_best_1rm(conn, template_id, hevy_id)
+        prev_best = _prev_session_best_1rm(conn, template_id, start_time, user_id)
+        all_time_best = _all_time_best_1rm(conn, template_id, hevy_id, user_id)
 
         for s in ex.get("sets", []):
             e1rm = epley_1rm(s.get("weight_kg"), s.get("reps"))
@@ -154,7 +164,7 @@ def _insert_exercises_and_sets(
                 INSERT INTO hevy_sets
                     (exercise_id, set_index, set_type, weight_kg, reps,
                      duration_seconds, distance_meters, rpe, estimated_1rm, performance_tag)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     exercise_db_id,
@@ -177,6 +187,7 @@ def _insert_exercises_and_sets(
 
 def sync_workouts() -> None:
     init_db()
+    user_id = get_local_user_id()
     api_key = os.environ["HEVY_API_KEY"]
 
     print("Fetching workouts from Hevy…")
@@ -190,8 +201,8 @@ def sync_workouts() -> None:
 
     with get_connection() as conn:
         for workout in all_workouts:
-            db_id = _upsert_workout(conn, workout)
-            _insert_exercises_and_sets(conn, db_id, workout)
+            db_id = _upsert_workout(conn, workout, user_id)
+            _insert_exercises_and_sets(conn, db_id, workout, user_id)
             conn.commit()
             print(f"  ✓ {workout.get('title', 'Untitled')}  [{workout['id']}]")
 

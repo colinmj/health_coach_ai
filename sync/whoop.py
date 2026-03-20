@@ -1,4 +1,4 @@
-"""Sync Whoop recovery and sleep data into SQLite.
+"""Sync Whoop recovery and sleep data into PostgreSQL.
 
 Run:
     python -m sync.whoop
@@ -8,12 +8,12 @@ in .env — run `python -m sync.whoop_auth` first if they are missing.
 """
 
 import os
-import sqlite3
 
+import psycopg
 from dotenv import load_dotenv
 
 from clients.whoop import WhoopClient
-from db.schema import get_connection, init_db
+from db.schema import get_connection, get_local_user_id, init_db
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ load_dotenv()
 # DB helpers — recovery
 # ---------------------------------------------------------------------------
 
-def _upsert_recovery(conn: sqlite3.Connection, cycle: dict) -> None:
+def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> None:
     """Insert or update a recovery row from a recovery record."""
     cycle_id = str(cycle["cycle_id"])
     recovery = cycle.get("score") or {}
@@ -34,17 +34,17 @@ def _upsert_recovery(conn: sqlite3.Connection, cycle: dict) -> None:
     score_state = cycle.get("score_state")
 
     existing = conn.execute(
-        "SELECT id FROM recovery WHERE whoop_cycle_id = ?", (cycle_id,)
+        "SELECT id FROM recovery WHERE whoop_cycle_id = %s AND user_id = %s",
+        (cycle_id, user_id),
     ).fetchone()
-
 
     if existing:
         conn.execute(
             """
             UPDATE recovery
-            SET date=?, score_state=?, recovery_score=?, hrv_rmssd_milli=?,
-                resting_heart_rate=?, spo2_percentage=?, skin_temp_celsius=?
-            WHERE whoop_cycle_id=?
+            SET date=%s, score_state=%s, recovery_score=%s, hrv_rmssd_milli=%s,
+                resting_heart_rate=%s, spo2_percentage=%s, skin_temp_celsius=%s
+            WHERE whoop_cycle_id=%s AND user_id=%s
             """,
             (
                 date,
@@ -55,17 +55,19 @@ def _upsert_recovery(conn: sqlite3.Connection, cycle: dict) -> None:
                 recovery.get("spo2_percentage"),
                 recovery.get("skin_temp_celsius"),
                 cycle_id,
+                user_id,
             ),
         )
     else:
         conn.execute(
             """
             INSERT INTO recovery
-                (whoop_cycle_id, date, score_state, recovery_score, hrv_rmssd_milli,
+                (user_id, whoop_cycle_id, date, score_state, recovery_score, hrv_rmssd_milli,
                  resting_heart_rate, spo2_percentage, skin_temp_celsius)
-            VALUES (?,?,?,?,?,?,?,?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
+                user_id,
                 cycle_id,
                 date,
                 score_state,
@@ -82,7 +84,7 @@ def _upsert_recovery(conn: sqlite3.Connection, cycle: dict) -> None:
 # DB helpers — sleep
 # ---------------------------------------------------------------------------
 
-def _upsert_sleep(conn: sqlite3.Connection, record: dict) -> None:
+def _upsert_sleep(conn: psycopg.Connection, record: dict, user_id: int) -> None:
     """Insert or update a sleep row."""
     sleep_id = str(record["id"])
     score = record.get("score") or {}
@@ -92,13 +94,14 @@ def _upsert_sleep(conn: sqlite3.Connection, record: dict) -> None:
     date = start[:10]  # YYYY-MM-DD
 
     existing = conn.execute(
-        "SELECT id FROM sleep WHERE whoop_sleep_id = ?", (sleep_id,)
+        "SELECT id FROM sleep WHERE whoop_sleep_id = %s AND user_id = %s",
+        (sleep_id, user_id),
     ).fetchone()
 
     values = (
         date,
         str(record.get("cycle_id", "")),
-        1 if record.get("nap") else 0,
+        bool(record.get("nap")),
         record.get("score_state"),
         start,
         record.get("end"),
@@ -117,28 +120,28 @@ def _upsert_sleep(conn: sqlite3.Connection, record: dict) -> None:
         conn.execute(
             """
             UPDATE sleep
-            SET date=?, whoop_cycle_id=?, is_nap=?, score_state=?,
-                start_time=?, end_time=?, total_in_bed_time_milli=?,
-                total_awake_time_milli=?, total_light_sleep_milli=?,
-                total_slow_wave_sleep_milli=?, total_rem_sleep_milli=?,
-                disturbance_count=?, sleep_performance_percentage=?,
-                sleep_efficiency_percentage=?, respiratory_rate=?
-            WHERE whoop_sleep_id=?
+            SET date=%s, whoop_cycle_id=%s, is_nap=%s, score_state=%s,
+                start_time=%s, end_time=%s, total_in_bed_time_milli=%s,
+                total_awake_time_milli=%s, total_light_sleep_milli=%s,
+                total_slow_wave_sleep_milli=%s, total_rem_sleep_milli=%s,
+                disturbance_count=%s, sleep_performance_percentage=%s,
+                sleep_efficiency_percentage=%s, respiratory_rate=%s
+            WHERE whoop_sleep_id=%s AND user_id=%s
             """,
-            (*values, sleep_id),
+            (*values, sleep_id, user_id),
         )
     else:
         conn.execute(
             """
             INSERT INTO sleep
-                (date, whoop_cycle_id, is_nap, score_state, start_time, end_time,
+                (user_id, date, whoop_cycle_id, is_nap, score_state, start_time, end_time,
                  total_in_bed_time_milli, total_awake_time_milli, total_light_sleep_milli,
                  total_slow_wave_sleep_milli, total_rem_sleep_milli, disturbance_count,
                  sleep_performance_percentage, sleep_efficiency_percentage,
                  respiratory_rate, whoop_sleep_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (*values, sleep_id),
+            (user_id, *values, sleep_id),
         )
 
 
@@ -148,6 +151,7 @@ def _upsert_sleep(conn: sqlite3.Connection, record: dict) -> None:
 
 def sync_whoop() -> None:
     init_db()
+    user_id = get_local_user_id()
 
     with WhoopClient(
         client_id=os.environ["WHOOP_CLIENT_ID"],
@@ -165,12 +169,12 @@ def sync_whoop() -> None:
 
     with get_connection() as conn:
         for cycle in cycles:
-            _upsert_recovery(conn, cycle)
+            _upsert_recovery(conn, cycle, user_id)
         conn.commit()
         print(f"Recovery synced: {len(cycles)} rows")
 
         for record in sleeps:
-            _upsert_sleep(conn, record)
+            _upsert_sleep(conn, record, user_id)
         conn.commit()
         print(f"Sleep synced: {len(sleeps)} rows")
 

@@ -1,11 +1,12 @@
 from db.schema import get_connection
 
 
-def get_body_composition(
+def get_nutrition(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Body composition measurements, optionally filtered by date range (YYYY-MM-DD)."""
+    """Macros and key performance micros per day from Cronometer.
+    Optionally filtered by date range (YYYY-MM-DD)."""
     conditions = []
     params: list = []
     if since is not None:
@@ -15,8 +16,10 @@ def get_body_composition(
         conditions.append("date <= %s")
         params.append(until)
     sql = """
-        SELECT date, weight_kg, fat_ratio, muscle_mass_kg, fat_free_mass_kg, bone_mass_kg
-        FROM body_measurements
+        SELECT date, source, energy_kcal, protein_g, carbs_g, net_carbs_g, fat_g,
+               fiber_g, sugars_g, magnesium_mg, sodium_mg, potassium_mg,
+               vitamin_d_iu, iron_mg, calcium_mg, completed
+        FROM nutrition_daily
     """
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)

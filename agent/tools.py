@@ -4,6 +4,7 @@ from langchain_core.tools import tool
 import analytics.hevy as hevy
 import analytics.whoop as whoop
 import analytics.withings as withings
+import analytics.nutrition as nutrition
 import analytics.correlations as corr
 
 
@@ -110,6 +111,23 @@ def get_body_composition(since: str = "", until: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Nutrition tools  (domain: "nutrition")
+# ---------------------------------------------------------------------------
+
+@tool
+def get_nutrition(since: str = "", until: str = "") -> str:
+    """Return daily macros and key performance micros from Cronometer.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list of records with fields: date, source, energy_kcal, protein_g,
+    carbs_g, net_carbs_g, fat_g, fiber_g, sugars_g, magnesium_mg, sodium_mg,
+    potassium_mg, vitamin_d_iu, iron_mg, calcium_mg, completed."""
+    return json.dumps(nutrition.get_nutrition(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+# ---------------------------------------------------------------------------
 # Correlation tools  (domain pairs — all domains they touch)
 # ---------------------------------------------------------------------------
 
@@ -176,6 +194,77 @@ def get_body_composition_vs_strength(
     ))
 
 
+@tool
+def get_nutrition_vs_performance(since: str = "", until: str = "") -> str:
+    """Use for 'does nutrition affect workout quality?' questions (carbs, calories, etc.).
+    Pairs same-day nutrition with each workout's performance score.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: workout_date, workout_title, performance_score,
+    best_tag, energy_kcal, protein_g, carbs_g, net_carbs_g, fat_g, fiber_g."""
+    return json.dumps(corr.get_nutrition_vs_performance(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_protein_vs_strength(since: str = "", until: str = "") -> str:
+    """Use for 'does protein intake correlate with strength over time?' questions.
+    Pairs daily protein with average session 1RM on workout days.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: date, protein_g, energy_kcal,
+    avg_session_1rm_kg, exercise_count."""
+    return json.dumps(corr.get_protein_vs_strength(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_nutrition_vs_recovery(since: str = "", until: str = "") -> str:
+    """Use for 'does what I eat affect my recovery?' questions.
+    Pairs prior-day nutrition with next-day Whoop recovery score.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: recovery_date, recovery_score, hrv_rmssd_milli,
+    prior_day_energy_kcal, prior_day_protein_g, prior_day_carbs_g, prior_day_fat_g."""
+    return json.dumps(corr.get_nutrition_vs_recovery(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_carbs_prior_to_prs(since: str = "", until: str = "") -> str:
+    """Use for 'did carb loading before PRs?' or 'carb intake before best workouts?' questions.
+    For each PR workout, returns carb totals for each of the 3 prior days plus a 3-day average.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: workout_date, workout_title, pr_sets,
+    carbs_day_minus_1, net_carbs_day_minus_1, carbs_day_minus_2, net_carbs_day_minus_2,
+    carbs_day_minus_3, net_carbs_day_minus_3, avg_carbs_3d, avg_net_carbs_3d."""
+    return json.dumps(corr.get_carbs_prior_to_prs(
+        since=since.strip() or None,
+        until=until.strip() or None,
+    ))
+
+
+@tool
+def get_nutrition_vs_body_composition(
+    since: str = "",
+    until: str = "",
+    days_window: str = "7",
+) -> str:
+    """Use for 'does calorie/macro intake correlate with body composition?' questions.
+    days_window controls how many days around a nutrition entry to look for a body measurement.
+    since/until are optional YYYY-MM-DD strings.
+    Returns a JSON list with fields: date, energy_kcal, protein_g, carbs_g, fat_g,
+    weight_kg, fat_ratio, muscle_mass_kg."""
+    return json.dumps(corr.get_nutrition_vs_body_composition(
+        since=since.strip() or None,
+        until=until.strip() or None,
+        days_window=int(days_window) if days_window.strip() else 7,
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Registry — maps each tool to the domains and sources it requires.
 #
@@ -197,17 +286,24 @@ TOOL_REGISTRY: list[tuple] = [
     (get_recovery,                       {"recovery"},                  {}),
     (get_sleep,                          {"recovery"},                  {}),
     (get_body_composition,               {"body_composition"},          {}),
+    (get_nutrition,                      {"nutrition"},                 {}),
     (get_hrv_vs_performance,             {"recovery", "strength"},      {"strength": "hevy"}),
     (get_sleep_vs_performance,           {"recovery", "strength"},      {"strength": "hevy"}),
     (get_sleep_threshold_vs_performance, {"recovery", "strength"},      {"strength": "hevy"}),
     (get_body_composition_vs_strength,   {"body_composition", "strength"}, {"strength": "hevy"}),
+    (get_nutrition_vs_performance,       {"nutrition", "strength"},     {"strength": "hevy"}),
+    (get_protein_vs_strength,            {"nutrition", "strength"},     {"strength": "hevy"}),
+    (get_carbs_prior_to_prs,             {"nutrition", "strength"},     {"strength": "hevy"}),
+    (get_nutrition_vs_recovery,          {"nutrition", "recovery"},     {}),
+    (get_nutrition_vs_body_composition,  {"nutrition", "body_composition"}, {}),
 ]
 
 # Default source map for single-user local mode
 DEFAULT_SOURCES: dict[str, str] = {
-    "strength":        "hevy",
-    "recovery":        "whoop",
+    "strength":         "hevy",
+    "recovery":         "whoop",
     "body_composition": "withings",
+    "nutrition":        "cronometer",
 }
 
 

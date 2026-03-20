@@ -1,4 +1,4 @@
-"""Sync Withings body composition data into SQLite.
+"""Sync Withings body composition data into PostgreSQL.
 
 Run:
     python -m sync.withings
@@ -8,13 +8,13 @@ in .env — run `python -m sync.withings_auth` first if they are missing.
 """
 
 import os
-import sqlite3
 from datetime import datetime, timezone
 
+import psycopg
 from dotenv import load_dotenv
 
 from clients.withings import WithingsClient
-from db.schema import get_connection, init_db
+from db.schema import get_connection, get_local_user_id, init_db
 
 load_dotenv()
 
@@ -35,8 +35,8 @@ def _decode(value: int, unit: int) -> float:
     return value * (10 ** unit)
 
 
-def _upsert_measurement(grp: dict, conn: sqlite3.Connection) -> None:
-    """Insert or replace a body_measurements row from a measuregrp dict."""
+def _upsert_measurement(grp: dict, conn: psycopg.Connection, user_id: int) -> None:
+    """Insert or update a body_measurements row from a measuregrp dict."""
     grp_id = grp["grpid"]
     unix_ts = grp["date"]
 
@@ -53,13 +53,25 @@ def _upsert_measurement(grp: dict, conn: sqlite3.Connection) -> None:
 
     conn.execute(
         """
-        INSERT OR REPLACE INTO body_measurements
-            (withings_group_id, measured_at, date,
+        INSERT INTO body_measurements
+            (user_id, withings_group_id, measured_at, date,
              weight_kg, fat_free_mass_kg, fat_ratio, fat_mass_kg,
              muscle_mass_kg, hydration_kg, bone_mass_kg)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, withings_group_id) DO UPDATE SET
+            measured_at      = EXCLUDED.measured_at,
+            date             = EXCLUDED.date,
+            weight_kg        = EXCLUDED.weight_kg,
+            fat_free_mass_kg = EXCLUDED.fat_free_mass_kg,
+            fat_ratio        = EXCLUDED.fat_ratio,
+            fat_mass_kg      = EXCLUDED.fat_mass_kg,
+            muscle_mass_kg   = EXCLUDED.muscle_mass_kg,
+            hydration_kg     = EXCLUDED.hydration_kg,
+            bone_mass_kg     = EXCLUDED.bone_mass_kg,
+            synced_at        = NOW()
         """,
         (
+            user_id,
             grp_id,
             measured_at,
             date,
@@ -76,6 +88,7 @@ def _upsert_measurement(grp: dict, conn: sqlite3.Connection) -> None:
 
 def sync_withings() -> None:
     init_db()
+    user_id = get_local_user_id()
 
     print("Fetching body measurements from Withings…")
     with WithingsClient(
@@ -92,7 +105,7 @@ def sync_withings() -> None:
 
     with get_connection() as conn:
         for grp in grps:
-            _upsert_measurement(grp, conn)
+            _upsert_measurement(grp, conn, user_id)
         conn.commit()
 
     print(f"Body measurements synced: {len(grps)} rows")

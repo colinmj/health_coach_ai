@@ -6,7 +6,7 @@ def get_exercise_prs(exercise_template_id: str | None = None) -> list[dict]:
     sql = "SELECT * FROM v_exercise_prs"
     params: list = []
     if exercise_template_id is not None:
-        sql += " WHERE exercise_template_id = ?"
+        sql += " WHERE exercise_template_id = %s"
         params.append(exercise_template_id)
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
@@ -22,13 +22,13 @@ def get_workout_1rm_history(
     conditions = []
     params: list = []
     if exercise_template_id is not None:
-        conditions.append("exercise_template_id = ?")
+        conditions.append("exercise_template_id = %s")
         params.append(exercise_template_id)
     if since is not None:
-        conditions.append("workout_date >= ?")
+        conditions.append("workout_date >= %s")
         params.append(since)
     if until is not None:
-        conditions.append("workout_date <= ?")
+        conditions.append("workout_date <= %s")
         params.append(until)
     sql = "SELECT * FROM v_workout_1rm"
     if conditions:
@@ -47,13 +47,13 @@ def get_workout_performance(
     conditions = []
     params: list = []
     if since is not None:
-        conditions.append("workout_date >= ?")
+        conditions.append("workout_date >= %s")
         params.append(since)
     if until is not None:
-        conditions.append("workout_date <= ?")
+        conditions.append("workout_date <= %s")
         params.append(until)
     if min_score is not None:
-        conditions.append("performance_score >= ?")
+        conditions.append("performance_score >= %s")
         params.append(min_score)
     sql = "SELECT * FROM v_workout_performance"
     if conditions:
