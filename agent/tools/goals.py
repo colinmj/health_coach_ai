@@ -31,7 +31,7 @@ def create_goal(
     """
     user_id = get_local_user_id()
 
-    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
     today = datetime.date.today().isoformat()
 
     try:
@@ -67,7 +67,7 @@ def create_goal(
         HumanMessage(content=f"Goal: {goal_text}\nActive insights: {insights_text}"),
     ])
     try:
-        protocol_data = json.loads(protocol_resp.content)
+        protocol_data = json.loads(str(protocol_resp.content))
     except json.JSONDecodeError:
         return f"Failed to parse protocol. LLM returned: {protocol_resp.content}"
 
@@ -86,26 +86,32 @@ def create_goal(
 
     with get_connection() as conn:
         # Enforce 3-active-goals cap
-        active_count = conn.execute(
+        row = conn.execute(
             "SELECT COUNT(*) AS n FROM goals WHERE user_id = %s AND status = 'active'",
             (user_id,),
-        ).fetchone()["n"]
+        ).fetchone()
+        assert row is not None
+        active_count = row["n"]
         if active_count >= 3:
             return "You already have 3 active goals. Mark one as achieved or abandoned before adding a new one."
 
         # Insert goal
-        goal_id = conn.execute(
+        goal_row = conn.execute(
             "INSERT INTO goals (user_id, raw_input, goal_text, domains, target_date) "
             "VALUES (%s, %s, %s, %s::jsonb, %s) RETURNING id",
             (user_id, goal_text, goal_text, json.dumps(parsed_domains), target_date_val),
-        ).fetchone()["id"]
+        ).fetchone()
+        assert goal_row is not None
+        goal_id = goal_row["id"]
 
         # Insert protocol
-        protocol_id = conn.execute(
+        protocol_row = conn.execute(
             "INSERT INTO protocols (user_id, goal_id, insight_ids, protocol_text, start_date, review_date) "
             "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s) RETURNING id",
             (user_id, goal_id, protocol_data["protocol_text"], today, protocol_data["review_date"]),
-        ).fetchone()["id"]
+        ).fetchone()
+        assert protocol_row is not None
+        protocol_id = protocol_row["id"]
 
         # Insert actions
         inserted_actions = []
@@ -170,6 +176,7 @@ def save_insight(
             "FROM insights WHERE user_id = %s",
             (user_id,),
         ).fetchone()
+        assert counts is not None
 
         existing = conn.execute(
             "SELECT * FROM insights WHERE user_id = %s AND correlative_tool = %s AND status = 'active'",
@@ -187,11 +194,13 @@ def save_insight(
             if counts["total"] - 1 >= 7:
                 return "Active insight cap (7) reached. Dismiss an insight before saving a new one."
 
-            new_id = conn.execute(
+            new_row = conn.execute(
                 "INSERT INTO insights (user_id, session_id, correlative_tool, insight, effect, confidence, date_derived) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (user_id, sid, correlative_tool, insight, effect, confidence, today),
-            ).fetchone()["id"]
+            ).fetchone()
+            assert new_row is not None
+            new_id = new_row["id"]
             conn.execute(
                 "UPDATE insights SET status = 'superseded', superseded_by = %s, updated_at = NOW() WHERE id = %s",
                 (new_id, existing["id"]),
@@ -202,11 +211,13 @@ def save_insight(
             if counts["total"] >= 7:
                 return "Active insight cap (7) reached. Dismiss an insight before saving a new one."
 
-            new_id = conn.execute(
+            new_row = conn.execute(
                 "INSERT INTO insights (user_id, session_id, correlative_tool, insight, effect, confidence, date_derived) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (user_id, sid, correlative_tool, insight, effect, confidence, today),
-            ).fetchone()["id"]
+            ).fetchone()
+            assert new_row is not None
+            new_id = new_row["id"]
             return json.dumps({"saved": True, "insight_id": new_id})
 
 

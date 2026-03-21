@@ -8,6 +8,7 @@ in .env — run `python -m sync.whoop_auth` first if they are missing.
 """
 
 import os
+from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
@@ -23,7 +24,7 @@ load_dotenv()
 # DB helpers — recovery
 # ---------------------------------------------------------------------------
 
-def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int, strain: float | None, daily_energy_kcal: float | None = None) -> None:
+def _upsert_recovery(conn: psycopg.Connection[dict[str, Any]], cycle: dict, user_id: int, strain: float | None, daily_energy_kcal: float | None = None) -> None:
     """Insert or update a recovery row from a recovery record."""
     cycle_id = str(cycle["cycle_id"])
     recovery = cycle.get("score") or {}
@@ -90,7 +91,7 @@ def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int, strain
 # DB helpers — sleep
 # ---------------------------------------------------------------------------
 
-def _upsert_sleep(conn: psycopg.Connection, record: dict, user_id: int) -> None:
+def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_id: int) -> None:
     """Insert or update a sleep row."""
     sleep_id = str(record["id"])
     score = record.get("score") or {}
@@ -155,7 +156,7 @@ def _upsert_sleep(conn: psycopg.Connection, record: dict, user_id: int) -> None:
 # DB helpers — activities
 # ---------------------------------------------------------------------------
 
-def _upsert_activity(conn: psycopg.Connection, record: dict, user_id: int) -> None:
+def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, user_id: int) -> None:
     """Insert or update a whoop_activities row from a workout record."""
     workout_id = str(record["id"])
     score = record.get("score") or {}

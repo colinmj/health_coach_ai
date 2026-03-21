@@ -2,6 +2,7 @@ import datetime
 import os
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
@@ -19,9 +20,11 @@ def _serializable_row(cursor):
 
     def make_row(values):
         row = base(values)
+        if row is None:
+            return {}
         return {
             k: (
-                v.isoformat() if isinstance(v, (datetime.date, datetime.datetime))
+                v.isoformat() if isinstance(v, datetime.date)
                 else float(v) if isinstance(v, Decimal)
                 else v
             )
@@ -31,7 +34,7 @@ def _serializable_row(cursor):
     return make_row
 
 
-def get_connection() -> psycopg.Connection:
+def get_connection() -> psycopg.Connection[dict[str, Any]]:
     conn = psycopg.connect(os.environ["DATABASE_URL"], row_factory=_serializable_row)
     return conn
 
@@ -63,4 +66,5 @@ def get_local_user_id() -> int:
             RETURNING id
             """,
         ).fetchone()
-    return row["id"]
+        assert row is not None
+        return row["id"]

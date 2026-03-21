@@ -10,6 +10,8 @@ in .env — run `python -m sync.withings_auth` first if they are missing.
 import os
 from datetime import datetime, timezone
 
+from typing import Any
+
 import psycopg
 from dotenv import load_dotenv
 
@@ -36,7 +38,7 @@ def _decode(value: int, unit: int) -> float:
     return value * (10 ** unit)
 
 
-def _upsert_measurement(grp: dict, conn: psycopg.Connection, user_id: int) -> None:
+def _upsert_measurement(grp: dict, conn: psycopg.Connection[dict[str, Any]], user_id: int) -> None:
     """Insert or update a body_measurements row from a measuregrp dict."""
     grp_id = grp["grpid"]
     unix_ts = grp["date"]
@@ -94,7 +96,7 @@ def sync_withings() -> None:
     # Only fetch measurements newer than the last successful sync
     last = get_last_synced_at(user_id, "body_composition")
     startdate = int(last.timestamp()) if last else None
-    if startdate:
+    if last:
         print(f"Incremental sync from {last.isoformat()}")
 
     print("Fetching body measurements from Withings…")

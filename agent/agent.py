@@ -1,6 +1,5 @@
 
 import datetime
-import json
 from typing import AsyncGenerator
 from dotenv import load_dotenv
 
@@ -17,18 +16,11 @@ from db.schema import get_local_user_id, get_connection
 
 load_dotenv()
 
-def build_context_block(user_id: int, current_session_id: int | None = None) -> str:
-    today = datetime.date.today()
-    soon = today + datetime.timedelta(days=7)
 
-    goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
-    pinned_insights = [
-        i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")
-    ]
-
-    # Latest compliance per action
+def _fetch_compliance_map(user_id: int) -> dict:
+    """Return latest compliance row per action_id for the given user."""
     with get_connection() as conn:
-        compliance_rows = conn.execute(
+        rows = conn.execute(
             """
             SELECT DISTINCT ON (action_id)
                 action_id, actual_value, met, week_start_date
@@ -38,47 +30,62 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
             """,
             (user_id,),
         ).fetchall()
-    compliance_map = {r["action_id"]: r for r in compliance_rows}
+    return {r["action_id"]: r for r in rows}
 
-    lines = ["## Current goals, protocols & compliance\n"]
 
+def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) -> list[str]:
+    """Render goals/protocols/actions into a list of text lines."""
+    lines: list[str] = []
     if not goals:
         lines.append("No active goals.\n")
-    else:
-        for g in goals:
-            lines.append(f"### Goal (id={g['id']}, status={g['status']}): {g['goal_text']}")
-            if g.get("target_date"):
-                lines.append(f"  Target date: {g['target_date']}")
-            for p in g.get("protocols", []):
-                lines.append(f"  Protocol (id={p['id']}, status={p['status']}): {p['protocol_text']}")
-                review = p.get("review_date")
-                if review:
-                    lines.append(f"    Review date: {review}")
-                    if str(review) <= soon.isoformat():
-                        lines.append("    ⚠️ REVIEW DUE WITHIN 7 DAYS")
-                for a in p.get("actions", []):
-                    comp = compliance_map.get(a["id"])
-                    if comp:
-                        actual = comp["actual_value"] if comp["actual_value"] is not None else "no data"
-                        met_str = {True: "✅", False: "❌", None: "—"}.get(comp["met"], "—")
-                        lines.append(
-                            f"    Action (id={a['id']}): {a['action_text']} "
-                            f"[{met_str} actual={actual}, target={a['target_value']}]"
-                        )
-                    else:
-                        lines.append(f"    Action (id={a['id']}): {a['action_text']} [no compliance data yet]")
+        return lines
+
+    for g in goals:
+        lines.append(f"### Goal (id={g['id']}, status={g['status']}): {g['goal_text']}")
+        if g.get("target_date"):
+            lines.append(f"  Target date: {g['target_date']}")
+        for p in g.get("protocols", []):
+            lines.append(f"  Protocol (id={p['id']}, status={p['status']}): {p['protocol_text']}")
+            review = p.get("review_date")
+            if review:
+                lines.append(f"    Review date: {review}")
+                if str(review) <= soon.isoformat():
+                    lines.append("    ⚠️ REVIEW DUE WITHIN 7 DAYS")
+            for a in p.get("actions", []):
+                comp = compliance_map.get(a["id"])
+                if comp:
+                    actual = comp["actual_value"] if comp["actual_value"] is not None else "no data"
+                    met_str = {True: "✅", False: "❌", None: "—"}.get(comp["met"], "—")
+                    lines.append(
+                        f"    Action (id={a['id']}): {a['action_text']} "
+                        f"[{met_str} actual={actual}, target={a['target_value']}]"
+                    )
+                else:
+                    lines.append(f"    Action (id={a['id']}): {a['action_text']} [no compliance data yet]")
+    return lines
+
+
+def build_context_block(user_id: int, current_session_id: int | None = None) -> str:
+    """Assemble the structured context block injected into the agent system prompt."""
+    today = datetime.date.today()
+    soon = today + datetime.timedelta(days=7)
+
+    goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
+    pinned_insights = [i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")]
+    compliance_map = _fetch_compliance_map(user_id)
+
+    lines = ["## Current goals, protocols & compliance\n"]
+    lines.extend(_format_goals_lines(goals, compliance_map, soon))
 
     if pinned_insights:
         lines.append("\n## Pinned insights")
         for i in pinned_insights:
             lines.append(f"- [{i['correlative_tool']}] {i['insight']} (effect={i['effect']}, confidence={i['confidence']})")
 
-    # Trends block
     trends_block = trends_analytics.build_trends_block(user_id)
     if trends_block:
         lines.append(f"\n{trends_block}")
 
-    # Recent session context (cross-session memory)
     recent_context = sessions.get_recent_context(user_id, exclude_session_id=current_session_id)
     if recent_context:
         lines.append(f"\n{recent_context}")
@@ -213,7 +220,7 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
 
     input_messages = history + [HumanMessage(content=query)]
@@ -257,7 +264,7 @@ async def astream_run(
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
     input_messages = history + [HumanMessage(content=query)]
 
@@ -269,6 +276,7 @@ async def astream_run(
         stream_mode=["messages", "values"],
     ):
         if mode == "messages":
+            assert isinstance(data, tuple)
             chunk, _metadata = data
             if isinstance(chunk, AIMessageChunk):
                 # Announce each tool call once, on the first chunk that carries its name
@@ -290,6 +298,7 @@ async def astream_run(
             final_state = data
 
     if final_state:
+        assert isinstance(final_state, dict)
         new_messages = final_state["messages"][len(history):]
         sessions.append_messages(session_id, new_messages)
 

@@ -24,7 +24,7 @@ _COLUMN_MAP = {
     "B1 (Thiamine) (mg)":        "b1_thiamine_mg",
     "B2 (Riboflavin) (mg)":      "b2_riboflavin_mg",
     "B3 (Niacin) (mg)":          "b3_niacin_mg",
-    "B5 (Pantothenic Acid) (mg)":"b5_pantothenic_acid_mg",
+    "B5 (Pantothenic Acid) (mg)": "b5_pantothenic_acid_mg",
     "B6 (Pyridoxine) (mg)":      "b6_pyridoxine_mg",
     "Vitamin C (mg)":            "vitamin_c_mg",
     "Vitamin D (IU)":            "vitamin_d_iu",

@@ -15,10 +15,12 @@ from db.schema import get_connection
 def create_session(user_id: int, title: str) -> int:
     """Create a new session and return its id. Title is truncated to 120 chars."""
     with get_connection() as conn:
-        return conn.execute(
+        row = conn.execute(
             "INSERT INTO sessions (user_id, title) VALUES (%s, %s) RETURNING id",
             (user_id, title[:120]),
-        ).fetchone()["id"]
+        ).fetchone()
+        assert row is not None
+        return row["id"]
 
 
 def load_messages(session_id: int) -> list:

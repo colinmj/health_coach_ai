@@ -9,6 +9,7 @@ accurate at insert time.
 """
 
 import os
+from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
@@ -34,7 +35,7 @@ def epley_1rm(weight_kg: float, reps: int) -> float | None:
 
 
 def _prev_session_best_1rm(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[dict[str, Any]],
     template_id: str,
     before_start_time: str,
     user_id: int,
@@ -56,7 +57,7 @@ def _prev_session_best_1rm(
 
 
 def _all_time_best_1rm(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[dict[str, Any]],
     template_id: str,
     exclude_hevy_id: str,
     user_id: int,
@@ -103,7 +104,7 @@ def tag_performance(
 # DB helpers
 # ---------------------------------------------------------------------------
 
-def _upsert_workout(conn: psycopg.Connection, workout: dict, user_id: int) -> int:
+def _upsert_workout(conn: psycopg.Connection[dict[str, Any]], workout: dict, user_id: int) -> int:
     hevy_id = workout["id"]
     row = conn.execute(
         "SELECT id FROM hevy_workouts WHERE hevy_id = %s AND user_id = %s",
@@ -117,7 +118,7 @@ def _upsert_workout(conn: psycopg.Connection, workout: dict, user_id: int) -> in
         )
         return row["id"]
 
-    row = conn.execute(
+    inserted = conn.execute(
         """
         INSERT INTO hevy_workouts (user_id, hevy_id, title, start_time, end_time)
         VALUES (%s, %s, %s, %s, %s)
@@ -125,11 +126,12 @@ def _upsert_workout(conn: psycopg.Connection, workout: dict, user_id: int) -> in
         """,
         (user_id, hevy_id, workout.get("title"), workout.get("start_time"), workout.get("end_time")),
     ).fetchone()
-    return row["id"]
+    assert inserted is not None
+    return inserted["id"]
 
 
 def _insert_exercises_and_sets(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[dict[str, Any]],
     workout_db_id: int,
     workout: dict,
     user_id: int,
@@ -143,14 +145,16 @@ def _insert_exercises_and_sets(
     for ex in workout.get("exercises", []):
         template_id = ex.get("exercise_template_id")
 
-        exercise_db_id = conn.execute(
+        exercise_row = conn.execute(
             """
             INSERT INTO hevy_exercises (workout_id, exercise_template_id, title, notes, exercise_index)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id
             """,
             (workout_db_id, template_id, ex.get("title"), ex.get("notes"), ex.get("index")),
-        ).fetchone()["id"]
+        ).fetchone()
+        assert exercise_row is not None
+        exercise_db_id = exercise_row["id"]
 
         # Baselines for tagging (only workouts already committed to DB)
         prev_best = _prev_session_best_1rm(conn, template_id, start_time, user_id)
