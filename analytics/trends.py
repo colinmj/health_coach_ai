@@ -5,6 +5,7 @@ Returns a markdown block; returns an empty string if no data is available.
 """
 
 from datetime import date, timedelta
+from typing import Any, cast
 
 from db.schema import get_connection
 
@@ -35,7 +36,7 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
 
     with get_connection() as conn:
         # --- Recovery & HRV ---
-        rec = conn.execute(  # type: ignore[call-overload]
+        rec = cast(dict[str, Any], conn.execute(  # type: ignore[call-overload]
             """
             SELECT
                 AVG(CASE WHEN date >= %s THEN recovery_score     END) AS rec_now,
@@ -47,10 +48,10 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
             """,
             (week_start, week_start, week_start, week_start,
              user_id, prior_start, today),
-        ).fetchone()  # type: ignore[index]
+        ).fetchone())
 
         # --- Sleep ---
-        slp = conn.execute(  # type: ignore[call-overload]
+        slp = cast(dict[str, Any], conn.execute(  # type: ignore[call-overload]
             """
             SELECT
                 AVG(CASE WHEN date >= %s THEN sleep_performance_percentage END) AS slp_now,
@@ -59,10 +60,10 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
             WHERE user_id = %s AND date >= %s AND date < %s AND is_nap = FALSE
             """,
             (week_start, week_start, user_id, prior_start, today),
-        ).fetchone()  # type: ignore[index]
+        ).fetchone())
 
         # --- Workouts ---
-        wrk = conn.execute(  # type: ignore[call-overload]
+        wrk = cast(dict[str, Any], conn.execute(  # type: ignore[call-overload]
             """
             SELECT
                 COUNT(CASE WHEN start_time::date >= %s THEN 1 END) AS wrk_now,
@@ -71,10 +72,10 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
             WHERE user_id = %s AND start_time::date >= %s AND start_time::date < %s
             """,
             (week_start, week_start, user_id, prior_start, today),
-        ).fetchone()  # type: ignore[index]
+        ).fetchone())
 
         # --- Nutrition ---
-        nut = conn.execute(  # type: ignore[call-overload]
+        nut = cast(dict[str, Any], conn.execute(  # type: ignore[call-overload]
             """
             SELECT
                 AVG(CASE WHEN date >= %s THEN protein_g    END) AS prot_now,
@@ -86,19 +87,19 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
             """,
             (week_start, week_start, week_start, week_start,
              user_id, prior_start, today),
-        ).fetchone()  # type: ignore[index]
+        ).fetchone())
 
         # --- Weight (latest reading vs latest reading before the window) ---
-        bdy_now = conn.execute(  # type: ignore[call-overload]
+        bdy_now = cast(dict[str, Any] | None, conn.execute(  # type: ignore[call-overload]
             "SELECT weight_kg FROM body_measurements "
             "WHERE user_id = %s AND date < %s ORDER BY date DESC LIMIT 1",
             (user_id, today),
-        ).fetchone()  # type: ignore[index]
-        bdy_prev = conn.execute(  # type: ignore[call-overload]
+        ).fetchone())
+        bdy_prev = cast(dict[str, Any] | None, conn.execute(  # type: ignore[call-overload]
             "SELECT weight_kg FROM body_measurements "
             "WHERE user_id = %s AND date < %s ORDER BY date DESC LIMIT 1",
             (user_id, week_start),
-        ).fetchone()  # type: ignore[index]
+        ).fetchone())
 
     # --- Build lines ---
     if rec["rec_now"] is not None:

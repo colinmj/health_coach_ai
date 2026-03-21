@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from clients.whoop import WhoopClient
 from db.schema import get_connection, get_local_user_id, init_db
+from sync.utils import get_last_synced_at, update_last_synced_at
 
 load_dotenv()
 
@@ -229,6 +230,12 @@ def sync_whoop() -> None:
     init_db()
     user_id = get_local_user_id()
 
+    # Only fetch records newer than the last successful sync
+    last = get_last_synced_at(user_id, "recovery")
+    since = last.isoformat() if last else None
+    if since:
+        print(f"Incremental sync from {since}")
+
     with WhoopClient(
         client_id=os.environ["WHOOP_CLIENT_ID"],
         client_secret=os.environ["WHOOP_CLIENT_SECRET"],
@@ -236,7 +243,7 @@ def sync_whoop() -> None:
         refresh_token=os.environ["WHOOP_REFRESH_TOKEN"],
     ) as client:
         print("Fetching cycles (for strain)…")
-        cycles = list(client.iter_cycles())
+        cycles = list(client.iter_cycles(start=since))
         strain_by_cycle: dict[str, float | None] = {}
         kcal_by_cycle: dict[str, float | None] = {}
         for c in cycles:
@@ -248,15 +255,15 @@ def sync_whoop() -> None:
         print(f"  {len(cycles)} cycles found")
 
         print("Fetching recovery…")
-        recovery_records = list(client.iter_recovery())
+        recovery_records = list(client.iter_recovery(start=since))
         print(f"  {len(recovery_records)} recovery records found")
 
         print("Fetching sleep…")
-        sleeps = list(client.iter_sleep())
+        sleeps = list(client.iter_sleep(start=since))
         print(f"  {len(sleeps)} sleep records found")
 
         print("Fetching activities…")
-        workouts = list(client.iter_workouts())
+        workouts = list(client.iter_workouts(start=since))
         print(f"  {len(workouts)} activity records found")
 
     with get_connection() as conn:
@@ -278,6 +285,7 @@ def sync_whoop() -> None:
         conn.commit()
         print(f"Activities synced: {len(workouts)} rows")
 
+    update_last_synced_at(user_id, "recovery", "whoop")
     print("Whoop sync complete.")
 
 

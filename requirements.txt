@@ -5,3 +5,5 @@ langchain-core
 langchain-anthropic
 langgraph
 pytest
+fastapi
+uvicorn[standard]

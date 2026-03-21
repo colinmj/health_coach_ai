@@ -34,7 +34,7 @@ python -m sync.withings_auth
 python -m agent.agent
 
 # Inline question
-python -m agent.agent "How does recovery impact my workout performance"
+python -m agent.agent "how did my sleep affect my lifting this week?"
 "
 ```
 

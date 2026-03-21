@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from clients.withings import WithingsClient
 from db.schema import get_connection, get_local_user_id, init_db
+from sync.utils import get_last_synced_at, update_last_synced_at
 
 load_dotenv()
 
@@ -90,6 +91,12 @@ def sync_withings() -> None:
     init_db()
     user_id = get_local_user_id()
 
+    # Only fetch measurements newer than the last successful sync
+    last = get_last_synced_at(user_id, "body_composition")
+    startdate = int(last.timestamp()) if last else None
+    if startdate:
+        print(f"Incremental sync from {last.isoformat()}")
+
     print("Fetching body measurements from Withings…")
     with WithingsClient(
         client_id=os.environ["WITHINGS_CLIENT_ID"],
@@ -98,7 +105,7 @@ def sync_withings() -> None:
         refresh_token=os.environ["WITHINGS_REFRESH_TOKEN"],
     ) as client:
         # Collect all groups then sort oldest-first for consistency
-        grps = list(client.iter_body_measurements())
+        grps = list(client.iter_body_measurements(startdate=startdate))
 
     grps.sort(key=lambda g: g["date"])
     print(f"  {len(grps)} measurement groups found")
@@ -109,6 +116,7 @@ def sync_withings() -> None:
         conn.commit()
 
     print(f"Body measurements synced: {len(grps)} rows")
+    update_last_synced_at(user_id, "body_composition", "withings")
     print("Withings sync complete.")
 
 

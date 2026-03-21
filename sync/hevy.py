@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from clients.hevy import HevyClient
 from db.schema import get_connection, get_local_user_id, init_db
+from sync.utils import get_last_synced_at, update_last_synced_at
 
 load_dotenv()
 
@@ -190,12 +191,24 @@ def sync_workouts() -> None:
     user_id = get_local_user_id()
     api_key = os.environ["HEVY_API_KEY"]
 
-    print("Fetching workouts from Hevy…")
-    with HevyClient(api_key) as client:
-        # Collect all pages (API returns newest-first), then reverse so that
-        # older workouts are inserted first and prev-session comparisons work.
-        all_workouts = list(client.iter_workouts())
+    # Hevy has no API-level date filter, so we stop paginating early once we
+    # hit workouts older than the last sync (API returns newest-first).
+    last = get_last_synced_at(user_id, "strength")
+    since = last.isoformat() if last else None
+    if since:
+        print(f"Incremental sync from {since}")
 
+    print("Fetching workouts from Hevy…")
+    all_workouts: list[dict] = []
+    with HevyClient(api_key) as client:
+        for workout in client.iter_workouts():
+            start_time = workout.get("start_time") or ""
+            if since and start_time < since:
+                break  # API is newest-first; everything after this is older
+            all_workouts.append(workout)
+
+    # Reverse so older workouts are processed first (required for correct
+    # performance tagging — each set compares against prior sessions).
     all_workouts.sort(key=lambda w: w.get("start_time") or "")
     print(f"Processing {len(all_workouts)} workouts (oldest-first)…")
 
@@ -206,6 +219,7 @@ def sync_workouts() -> None:
             conn.commit()
             print(f"  ✓ {workout.get('title', 'Untitled')}  [{workout['id']}]")
 
+    update_last_synced_at(user_id, "strength", "hevy")
     print("Sync complete.")
 
 

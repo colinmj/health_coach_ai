@@ -1,11 +1,12 @@
+
 import datetime
 import json
-
+from typing import AsyncGenerator
 from dotenv import load_dotenv
-load_dotenv()
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage
+
+from langchain_core.messages import HumanMessage, AIMessageChunk
 from langgraph.prebuilt import create_react_agent
 
 from agent.tools import build_tools
@@ -14,6 +15,7 @@ import analytics.goals as goals_analytics
 import analytics.trends as trends_analytics
 from db.schema import get_local_user_id, get_connection
 
+load_dotenv()
 
 def build_context_block(user_id: int, current_session_id: int | None = None) -> str:
     today = datetime.date.today()
@@ -85,7 +87,7 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
 
 
 SYSTEM_PROMPT = """\
-You are a personal health analytics assistant with access to real health data.
+You are a peak performance coach and personal health analytics assistant with access to real health data.
 
 Today's date is {today}.
 
@@ -140,14 +142,53 @@ pre-aggregated rows. Narrate the pattern; do not compute statistics yourself.
 8. If data is missing for a date, say so clearly.
 9. Lead with the direct answer, then supporting data. Keep responses concise.
 
+## Goal setting
+
+Before calling create_goal you MUST complete all four steps:
+
+**Step 1 — Confirm intent**
+Only proceed if the user explicitly wants to set a goal ("I want to", "my goal is", \
+"help me achieve", "I'd like to"). A passing comment about health does not trigger goal setting.
+
+**Step 2 — Check measurability**
+Map the goal to its required data domains. If a required domain is not connected, tell the \
+user what they'd need — do NOT call create_goal:
+
+  Goal type                         | Required domains
+  ----------------------------------|-------------------------------------------
+  Lose weight / body composition    | body_composition (Withings)
+  Calorie deficit / fat loss        | body_composition + nutrition (Cronometer)
+  Gain strength / hit a lift PR     | strength (Hevy)
+  Improve sleep or recovery         | recovery (Whoop)
+  Eat more protein / hit macros     | nutrition (Cronometer)
+  Cardio / sport performance        | recovery (Whoop activities)
+
+If a domain is missing: "To track [goal], you'd need [source] connected. Without it I \
+can't measure progress." Do NOT call create_goal.
+
+**Step 3 — Make it specific and time-bound**
+If the goal is vague, ask the minimum questions to make it SMART. Ask one question at a \
+time, wait for the answer, then ask the next if needed:
+- "What specific outcome are you aiming for?" (e.g. lose X kg, bench X kg, eat Xg protein/day)
+- "What's your target timeframe?"
+Insights are NOT required — proceed to Step 4 even if the user has no insights yet.
+
+**Step 4 — Confirm before saving**
+Summarise the goal in one sentence and ask for confirmation before calling create_goal:
+  "Your goal is: lose 9 kg by 2026-06-21, measured via body weight. I'll create a protocol \
+with daily calorie and weigh-in actions. Shall I save this?"
+Only call create_goal after the user confirms.
+
 ## Goals, protocols, and insights
-- Active goals, protocols, actions, and compliance are in the context block above.
-  Factor them into all responses.
-- When a correlative tool returns data, check if it confirms or contradicts an existing
-  insight for the same tool. If contradicting, offer to call save_insight.
-- Only derive a new insight when data is conclusive (≥8 data points, clear trend).
-  When conclusive, frame your response to include the insight and ask if the user wants
-  to save it before calling save_insight.
+
+- Active goals, protocols, actions, and compliance are in the context block. Always reference them.
+- After calling create_goal, summarise what was saved: goal, protocol, and each action with its \
+target. Offer to run check_compliance immediately.
+- Insights are optional. A user may have zero insights and still set goals.
+- When a correlative tool returns data, check if it confirms or contradicts an existing insight \
+for the same tool. If contradicting, offer to call save_insight.
+- Only derive a new insight when data is conclusive (≥8 data points, clear trend). Frame the \
+insight clearly and ask the user before calling save_insight.
 - If a protocol review_date is within 7 days, flag it and offer to run assess_protocol.
 - Never invent compliance figures. If actual_value is null, say "No data available."\
 """
@@ -194,23 +235,97 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     return response, session_id
 
 
+async def astream_run(
+    query: str, session_id: int | None = None
+) -> AsyncGenerator[dict, None]:
+    """Stream one agent turn, yielding event dicts.
+
+    Event types:
+      {"type": "tool_start", "name": "<tool_name>"}  — tool is about to be called
+      {"type": "token",      "text": "..."}           — AI response text token
+      {"type": "done",       "session_id": <int>}     — stream finished, messages persisted
+    """
+    today = datetime.date.today().isoformat()
+    user_id = get_local_user_id()
+
+    if session_id is None:
+        session_id = sessions.create_session(user_id, query)
+        history = []
+    else:
+        history = sessions.load_messages(session_id)
+
+    context = build_context_block(user_id, current_session_id=session_id)
+    prompt = SYSTEM_PROMPT.format(today=today, context=context)
+
+    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
+    agent = create_react_agent(llm, build_tools(), prompt=prompt)
+    input_messages = history + [HumanMessage(content=query)]
+
+    final_state = None
+    announced: set[str] = set()  # track announced tool calls by chunk index
+
+    async for mode, data in agent.astream(
+        {"messages": input_messages},
+        stream_mode=["messages", "values"],
+    ):
+        if mode == "messages":
+            chunk, _metadata = data
+            if isinstance(chunk, AIMessageChunk):
+                # Announce each tool call once, on the first chunk that carries its name
+                for tc in chunk.tool_call_chunks or []:
+                    key = str(tc.get("index", ""))
+                    if tc.get("name") and key not in announced:
+                        announced.add(key)
+                        yield {"type": "tool_start", "name": tc["name"]}
+                # Stream text tokens
+                if isinstance(chunk.content, str) and chunk.content:
+                    yield {"type": "token", "text": chunk.content}
+                elif isinstance(chunk.content, list):
+                    for block in chunk.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                yield {"type": "token", "text": text}
+        elif mode == "values":
+            final_state = data
+
+    if final_state:
+        new_messages = final_state["messages"][len(history):]
+        sessions.append_messages(session_id, new_messages)
+
+    yield {"type": "done", "session_id": session_id}
+
+
 if __name__ == "__main__":
+    import asyncio
     import sys
 
-    # Simple multi-turn REPL
-    current_session: int | None = None
-    first_query = " ".join(sys.argv[1:])
+    async def _repl() -> None:
+        current_session: int | None = None
+        first_query = " ".join(sys.argv[1:])
 
-    if first_query:
-        response, current_session = run(first_query, current_session)
-        print(f"\nAssistant: {response}\n")
+        async def _ask(q: str) -> None:
+            nonlocal current_session
+            print("\nAssistant: ", end="", flush=True)
+            async for event in astream_run(q, current_session):
+                if event["type"] == "token":
+                    print(event["text"], end="", flush=True)
+                elif event["type"] == "tool_start":
+                    print(f"\n[{event['name']}...]", end="", flush=True)
+                elif event["type"] == "done":
+                    current_session = event["session_id"]
+            print("\n")
 
-    while True:
-        try:
-            query = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if not query:
-            continue
-        response, current_session = run(query, current_session)
-        print(f"\nAssistant: {response}\n")
+        if first_query:
+            await _ask(first_query)
+
+        while True:
+            try:
+                query = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not query:
+                continue
+            await _ask(query)
+
+    asyncio.run(_repl())
