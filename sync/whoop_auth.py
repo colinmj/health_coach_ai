@@ -24,7 +24,7 @@ load_dotenv()
 _ENV_PATH = Path(".env")
 _AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
 _TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
-_SCOPES = "offline read:cycles read:recovery read:sleep"
+_SCOPES = "offline read:cycles read:recovery read:sleep read:workout"
 
 
 def _build_auth_url(client_id: str, redirect_uri: str, state: str) -> str:

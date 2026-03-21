@@ -11,12 +11,24 @@
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS users (
-    id         SERIAL      PRIMARY KEY,
-    email      TEXT        UNIQUE NOT NULL,
-    name       TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id            SERIAL      PRIMARY KEY,
+    email         TEXT        UNIQUE NOT NULL,
+    name          TEXT,
+    date_of_birth DATE,
+    sex           TEXT        CHECK (sex IN ('male', 'female', 'other')),
+    height_cm     REAL,
+    weight_kg     REAL,        -- latest value, updated by body composition sync
+    fat_ratio     REAL,        -- latest value, updated by body composition sync
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migrate: add profile columns if upgrading from a pre-profile schema
+ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sex           TEXT CHECK (sex IN ('male', 'female', 'other'));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS height_cm     REAL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS weight_kg     REAL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fat_ratio     REAL;
 
 -- One row per (user, domain). Stores OAuth tokens and tracks which source is
 -- active for each domain (strength, recovery, body_composition, nutrition).
@@ -90,8 +102,40 @@ CREATE TABLE IF NOT EXISTS recovery (
     resting_heart_rate REAL,
     spo2_percentage    REAL,
     skin_temp_celsius  REAL,
+    strain             REAL,
+    daily_energy_kcal  REAL,
     synced_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, whoop_cycle_id)
+);
+
+ALTER TABLE recovery ADD COLUMN IF NOT EXISTS daily_energy_kcal REAL;
+
+-- Migrate: add strain column if upgrading from a pre-strain schema
+ALTER TABLE recovery ADD COLUMN IF NOT EXISTS strain REAL;
+
+CREATE TABLE IF NOT EXISTS whoop_activities (
+    id               SERIAL      PRIMARY KEY,
+    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    whoop_workout_id TEXT        NOT NULL,
+    whoop_cycle_id   TEXT,
+    date             DATE        NOT NULL,
+    sport_id         INTEGER,
+    sport_name       TEXT,
+    score_state      TEXT,
+    start_time       TIMESTAMPTZ,
+    end_time         TIMESTAMPTZ,
+    strain           REAL,
+    energy_kcal      REAL,
+    avg_heart_rate   INTEGER,
+    max_heart_rate   INTEGER,
+    zone_zero_milli  BIGINT,
+    zone_one_milli   BIGINT,
+    zone_two_milli   BIGINT,
+    zone_three_milli BIGINT,
+    zone_four_milli  BIGINT,
+    zone_five_milli  BIGINT,
+    synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, whoop_workout_id)
 );
 
 CREATE TABLE IF NOT EXISTS sleep (
@@ -228,9 +272,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     id         SERIAL      PRIMARY KEY,
     user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title      TEXT,
+    summary    TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary TEXT;
 
 -- Full message history for a session. Tool calls are stored as role='tool'
 -- with tool_name populated. This is the source of truth fed back into the
@@ -238,24 +285,87 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS messages (
     id         SERIAL      PRIMARY KEY,
     session_id INTEGER     NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role       TEXT        NOT NULL,  -- 'user' | 'assistant' | 'tool'
+    role       TEXT        NOT NULL,  -- 'human' | 'ai' | 'tool'
     content    TEXT        NOT NULL,
     tool_name  TEXT,                  -- populated when role = 'tool'
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- User-curated insights saved from chat. At runtime, active insights are
--- fetched and injected into the agent's system prompt so the agent remembers
--- what the user has learned about themselves across sessions.
+-- Drop old insights table (incompatible schema, no data)
+DROP TABLE IF EXISTS insights CASCADE;
+
 CREATE TABLE IF NOT EXISTS insights (
-    id         SERIAL      PRIMARY KEY,
-    user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id INTEGER     REFERENCES sessions(id) ON DELETE SET NULL,
-    body       TEXT        NOT NULL,   -- e.g. "I sleep better when I eat more fiber"
-    tags       TEXT[]      NOT NULL DEFAULT '{}',  -- e.g. '{sleep, nutrition}'
-    is_active  BOOLEAN     NOT NULL DEFAULT TRUE,  -- soft delete / user can toggle off
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id               SERIAL      PRIMARY KEY,
+    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id       INTEGER     REFERENCES sessions(id) ON DELETE SET NULL,
+    correlative_tool TEXT        NOT NULL,
+    insight          TEXT        NOT NULL,
+    effect           TEXT        NOT NULL CHECK (effect IN ('positive','negative','neutral')),
+    confidence       TEXT        NOT NULL CHECK (confidence IN ('strong','moderate')),
+    date_derived     DATE        NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'active'
+                                 CHECK (status IN ('active','superseded','dismissed')),
+    superseded_by    INTEGER     REFERENCES insights(id) ON DELETE SET NULL,
+    pinned           BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+CREATE TABLE IF NOT EXISTS goals (
+    id           SERIAL      PRIMARY KEY,
+    user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id   INTEGER     REFERENCES sessions(id) ON DELETE SET NULL,
+    raw_input    TEXT        NOT NULL,
+    goal_text    TEXT        NOT NULL,
+    domains      JSONB       NOT NULL DEFAULT '[]',
+    target_date  DATE,
+    status       TEXT        NOT NULL DEFAULT 'active'
+                             CHECK (status IN ('active','achieved','abandoned')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS protocols (
+    id            SERIAL      PRIMARY KEY,
+    user_id       INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id    INTEGER     REFERENCES sessions(id) ON DELETE SET NULL,
+    goal_id       INTEGER     NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+    insight_ids   JSONB       NOT NULL DEFAULT '[]',
+    protocol_text TEXT        NOT NULL,
+    start_date    DATE        NOT NULL,
+    review_date   DATE        NOT NULL,
+    status        TEXT        NOT NULL DEFAULT 'active'
+                              CHECK (status IN ('active','completed','abandoned')),
+    outcome       TEXT        CHECK (outcome IN ('effective','ineffective','inconclusive')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS actions (
+    id           SERIAL      PRIMARY KEY,
+    protocol_id  INTEGER     NOT NULL REFERENCES protocols(id) ON DELETE CASCADE,
+    user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    action_text  TEXT        NOT NULL,
+    metric       TEXT        NOT NULL,
+    condition    TEXT        NOT NULL CHECK (condition IN ('less_than','greater_than','equals')),
+    target_value NUMERIC     NOT NULL,
+    data_source  TEXT        NOT NULL,
+    frequency    TEXT        NOT NULL DEFAULT 'daily'
+                             CHECK (frequency IN ('daily','weekly')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS action_compliance (
+    id              SERIAL      PRIMARY KEY,
+    action_id       INTEGER     NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+    user_id         INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_start_date DATE        NOT NULL,
+    target_value    NUMERIC     NOT NULL,
+    actual_value    NUMERIC,          -- NULL means data was unavailable
+    met             BOOLEAN,          -- NULL means data was unavailable
+    checked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (action_id, week_start_date)
 );
 
 
@@ -269,11 +379,23 @@ CREATE INDEX IF NOT EXISTS idx_recovery_user_date         ON recovery      (user
 CREATE INDEX IF NOT EXISTS idx_sleep_user_date            ON sleep         (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_nutrition_daily_user_date  ON nutrition_daily   (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_whoop_activities_user_date ON whoop_activities  (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_whoop_activities_sport     ON whoop_activities  (user_id, sport_name);
 
 -- Agent — session lookup and message retrieval are the hot paths
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id           ON sessions  (user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session_id        ON messages  (session_id);
-CREATE INDEX IF NOT EXISTS idx_insights_user_active       ON insights  (user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_insights_user_status       ON insights  (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_insights_correlative       ON insights  (user_id, correlative_tool, status);
+CREATE INDEX IF NOT EXISTS idx_goals_user_status          ON goals     (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_protocols_user_status      ON protocols (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_protocols_goal_id          ON protocols (goal_id);
+CREATE INDEX IF NOT EXISTS idx_actions_protocol_id        ON actions   (protocol_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_action_week     ON action_compliance (action_id, week_start_date);
+
+-- One active protocol per goal (DB-level guard)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_protocols_one_active_per_goal
+    ON protocols (goal_id) WHERE (status = 'active');
 
 
 -- -----------------------------------------------------------------------------

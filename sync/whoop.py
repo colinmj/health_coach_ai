@@ -1,4 +1,4 @@
-"""Sync Whoop recovery and sleep data into PostgreSQL.
+"""Sync Whoop recovery, sleep, and activity data into PostgreSQL.
 
 Run:
     python -m sync.whoop
@@ -22,7 +22,7 @@ load_dotenv()
 # DB helpers — recovery
 # ---------------------------------------------------------------------------
 
-def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> None:
+def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int, strain: float | None, daily_energy_kcal: float | None = None) -> None:
     """Insert or update a recovery row from a recovery record."""
     cycle_id = str(cycle["cycle_id"])
     recovery = cycle.get("score") or {}
@@ -43,7 +43,8 @@ def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> Non
             """
             UPDATE recovery
             SET date=%s, score_state=%s, recovery_score=%s, hrv_rmssd_milli=%s,
-                resting_heart_rate=%s, spo2_percentage=%s, skin_temp_celsius=%s
+                resting_heart_rate=%s, spo2_percentage=%s, skin_temp_celsius=%s,
+                strain=%s, daily_energy_kcal=%s
             WHERE whoop_cycle_id=%s AND user_id=%s
             """,
             (
@@ -54,6 +55,8 @@ def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> Non
                 recovery.get("resting_heart_rate"),
                 recovery.get("spo2_percentage"),
                 recovery.get("skin_temp_celsius"),
+                strain,
+                daily_energy_kcal,
                 cycle_id,
                 user_id,
             ),
@@ -63,8 +66,8 @@ def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> Non
             """
             INSERT INTO recovery
                 (user_id, whoop_cycle_id, date, score_state, recovery_score, hrv_rmssd_milli,
-                 resting_heart_rate, spo2_percentage, skin_temp_celsius)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 resting_heart_rate, spo2_percentage, skin_temp_celsius, strain, daily_energy_kcal)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
@@ -76,6 +79,8 @@ def _upsert_recovery(conn: psycopg.Connection, cycle: dict, user_id: int) -> Non
                 recovery.get("resting_heart_rate"),
                 recovery.get("spo2_percentage"),
                 recovery.get("skin_temp_celsius"),
+                strain,
+                daily_energy_kcal,
             ),
         )
 
@@ -107,9 +112,9 @@ def _upsert_sleep(conn: psycopg.Connection, record: dict, user_id: int) -> None:
         record.get("end"),
         stage.get("total_in_bed_time_milli"),
         stage.get("total_awake_time_milli"),
-        stage.get("total_light_sleep_milli"),
-        stage.get("total_slow_wave_sleep_milli"),
-        stage.get("total_rem_sleep_milli"),
+        stage.get("total_light_sleep_time_milli"),
+        stage.get("total_slow_wave_sleep_time_milli"),
+        stage.get("total_rem_sleep_time_milli"),
         stage.get("disturbance_count"),
         score.get("sleep_performance_percentage"),
         score.get("sleep_efficiency_percentage"),
@@ -146,6 +151,77 @@ def _upsert_sleep(conn: psycopg.Connection, record: dict, user_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# DB helpers — activities
+# ---------------------------------------------------------------------------
+
+def _upsert_activity(conn: psycopg.Connection, record: dict, user_id: int) -> None:
+    """Insert or update a whoop_activities row from a workout record."""
+    workout_id = str(record["id"])
+    score = record.get("score") or {}
+    zones = score.get("zone_duration") or {}
+
+    start = record.get("start", "")
+    date = start[:10]  # YYYY-MM-DD
+
+    sport_id = record.get("sport_id")
+    sport_name = record.get("sport_name")
+    kilojoules = score.get("kilojoule")
+    energy_kcal = kilojoules / 4.184 if kilojoules is not None else None
+
+    existing = conn.execute(
+        "SELECT id FROM whoop_activities WHERE whoop_workout_id = %s AND user_id = %s",
+        (workout_id, user_id),
+    ).fetchone()
+
+    values = (
+        str(record.get("cycle_id", "")),
+        date,
+        sport_id,
+        sport_name,
+        record.get("score_state"),
+        start,
+        record.get("end"),
+        score.get("strain"),
+        energy_kcal,
+        score.get("average_heart_rate"),
+        score.get("max_heart_rate"),
+        zones.get("zone_zero_milli"),
+        zones.get("zone_one_milli"),
+        zones.get("zone_two_milli"),
+        zones.get("zone_three_milli"),
+        zones.get("zone_four_milli"),
+        zones.get("zone_five_milli"),
+    )
+
+    if existing:
+        conn.execute(
+            """
+            UPDATE whoop_activities
+            SET whoop_cycle_id=%s, date=%s, sport_id=%s, sport_name=%s, score_state=%s,
+                start_time=%s, end_time=%s, strain=%s, energy_kcal=%s,
+                avg_heart_rate=%s, max_heart_rate=%s,
+                zone_zero_milli=%s, zone_one_milli=%s, zone_two_milli=%s,
+                zone_three_milli=%s, zone_four_milli=%s, zone_five_milli=%s
+            WHERE whoop_workout_id=%s AND user_id=%s
+            """,
+            (*values, workout_id, user_id),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO whoop_activities
+                (user_id, whoop_workout_id, whoop_cycle_id, date, sport_id, sport_name,
+                 score_state, start_time, end_time, strain, energy_kcal,
+                 avg_heart_rate, max_heart_rate,
+                 zone_zero_milli, zone_one_milli, zone_two_milli,
+                 zone_three_milli, zone_four_milli, zone_five_milli)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (user_id, workout_id, *values),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -159,24 +235,48 @@ def sync_whoop() -> None:
         access_token=os.environ["WHOOP_ACCESS_TOKEN"],
         refresh_token=os.environ["WHOOP_REFRESH_TOKEN"],
     ) as client:
+        print("Fetching cycles (for strain)…")
+        cycles = list(client.iter_cycles())
+        strain_by_cycle: dict[str, float | None] = {}
+        kcal_by_cycle: dict[str, float | None] = {}
+        for c in cycles:
+            cid = str(c["id"])
+            score = c.get("score") or {}
+            strain_by_cycle[cid] = score.get("strain")
+            kj = score.get("kilojoule")
+            kcal_by_cycle[cid] = kj / 4.184 if kj is not None else None
+        print(f"  {len(cycles)} cycles found")
+
         print("Fetching recovery…")
-        cycles = list(client.iter_recovery())
-        print(f"  {len(cycles)} recovery records found")
+        recovery_records = list(client.iter_recovery())
+        print(f"  {len(recovery_records)} recovery records found")
 
         print("Fetching sleep…")
         sleeps = list(client.iter_sleep())
         print(f"  {len(sleeps)} sleep records found")
 
+        print("Fetching activities…")
+        workouts = list(client.iter_workouts())
+        print(f"  {len(workouts)} activity records found")
+
     with get_connection() as conn:
-        for cycle in cycles:
-            _upsert_recovery(conn, cycle, user_id)
+        for record in recovery_records:
+            cycle_id = str(record.get("cycle_id", ""))
+            strain = strain_by_cycle.get(cycle_id)
+            daily_energy_kcal = kcal_by_cycle.get(cycle_id)
+            _upsert_recovery(conn, record, user_id, strain, daily_energy_kcal)
         conn.commit()
-        print(f"Recovery synced: {len(cycles)} rows")
+        print(f"Recovery synced: {len(recovery_records)} rows")
 
         for record in sleeps:
             _upsert_sleep(conn, record, user_id)
         conn.commit()
         print(f"Sleep synced: {len(sleeps)} rows")
+
+        for record in workouts:
+            _upsert_activity(conn, record, user_id)
+        conn.commit()
+        print(f"Activities synced: {len(workouts)} rows")
 
     print("Whoop sync complete.")
 

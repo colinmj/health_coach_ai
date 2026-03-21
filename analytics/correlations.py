@@ -355,6 +355,100 @@ def get_nutrition_vs_recovery(
     return [dict(row) for row in rows]
 
 
+def get_nutrition_vs_activity(
+    sport_name: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Pairs prior-night nutrition with activity performance metrics (HR, strain, calories).
+
+    Designed for questions like 'how does carb intake the night before affect my max heart rate
+    when I play hockey?'. sport_name is matched case-insensitively.
+    Returns one row per activity session that has nutrition data for the prior day.
+    """
+    conditions = ["a.score_state = 'SCORED'"]
+    params: list = []
+    if sport_name is not None:
+        conditions.append("a.sport_name ILIKE %s")
+        params.append(f"%{sport_name}%")
+    if since is not None:
+        conditions.append("a.date >= %s")
+        params.append(since)
+    if until is not None:
+        conditions.append("a.date <= %s")
+        params.append(until)
+
+    where = "WHERE " + " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            a.date               AS activity_date,
+            a.sport_name,
+            a.strain,
+            a.avg_heart_rate,
+            a.max_heart_rate,
+            a.energy_kcal        AS calories_burned,
+            n.energy_kcal        AS prior_night_energy_kcal,
+            n.carbs_g            AS prior_night_carbs_g,
+            n.net_carbs_g        AS prior_night_net_carbs_g,
+            n.protein_g          AS prior_night_protein_g,
+            n.fat_g              AS prior_night_fat_g,
+            n.sugars_g           AS prior_night_sugars_g
+        FROM whoop_activities a
+        JOIN nutrition_daily n ON n.date = a.date - INTERVAL '1 day'
+        {where}
+        ORDER BY a.date
+    """
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_activity_vs_strength(
+    sport_name: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Pairs each Hevy workout with any Whoop activity logged the prior day.
+
+    Designed for questions like 'do my lifts suffer the day after running?'
+    sport_name is matched case-insensitively. Leave None to include all sports.
+    Returns one row per (workout, prior-day activity) pair.
+    """
+    conditions = ["a.score_state = 'SCORED'"]
+    params: list = []
+    if sport_name is not None:
+        conditions.append("a.sport_name ILIKE %s")
+        params.append(f"%{sport_name}%")
+    if since is not None:
+        conditions.append("vp.workout_date >= %s")
+        params.append(since)
+    if until is not None:
+        conditions.append("vp.workout_date <= %s")
+        params.append(until)
+
+    where = "WHERE " + " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            vp.workout_date,
+            vp.workout_title,
+            vp.performance_score,
+            vp.best_tag,
+            vp.total_sets,
+            a.sport_name          AS prior_day_sport,
+            a.strain              AS prior_day_strain,
+            a.avg_heart_rate      AS prior_day_avg_hr,
+            a.max_heart_rate      AS prior_day_max_hr,
+            a.energy_kcal         AS prior_day_calories
+        FROM v_workout_performance vp
+        JOIN whoop_activities a ON a.date = vp.workout_date - INTERVAL '1 day'
+        {where}
+        ORDER BY vp.workout_date
+    """
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_nutrition_vs_body_composition(
     since: str | None = None,
     until: str | None = None,
@@ -404,4 +498,93 @@ def get_nutrition_vs_body_composition(
     """
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_energy_balance_vs_weight(
+    user_id: int,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Daily energy balance (calories consumed minus Whoop daily burn) paired with
+    rolling weight trend.
+
+    Returns one row per day where both nutrition and a scored Whoop recovery record
+    exist. Rolling 7-day averages smooth out day-to-day noise. The expected weight
+    change column applies the 7700 kcal/kg rule to the rolling balance so the agent
+    can compare it against the actual weight delta — exposing tracking errors or
+    Whoop inaccuracy when the two diverge significantly.
+    """
+    conditions = ["n.user_id = %s", "n.energy_kcal IS NOT NULL", "r.daily_energy_kcal IS NOT NULL"]
+    params: list = []
+
+    # user_id appears three times: once in the main WHERE and twice in the LATERAL joins
+    # We build the date filters separately so we can apply them to the CTE
+    date_conditions = []
+    if since is not None:
+        date_conditions.append("n.date >= %s")
+        params.append(since)
+    if until is not None:
+        date_conditions.append("n.date <= %s")
+        params.append(until)
+
+    all_conditions = conditions + date_conditions
+    where = "WHERE " + " AND ".join(all_conditions)
+
+    sql = f"""
+        WITH daily_balance AS (
+            SELECT
+                n.date,
+                n.energy_kcal                              AS calories_consumed,
+                r.daily_energy_kcal                        AS calories_burned,
+                n.energy_kcal - r.daily_energy_kcal        AS daily_balance
+            FROM nutrition_daily n
+            JOIN recovery r
+              ON r.date = n.date
+             AND r.user_id = n.user_id
+             AND r.score_state = 'SCORED'
+            {where}
+            ORDER BY n.date
+        ),
+        rolling AS (
+            SELECT
+                date,
+                ROUND(calories_consumed::numeric, 1)                                        AS calories_consumed,
+                ROUND(calories_burned::numeric, 1)                                          AS calories_burned,
+                ROUND(daily_balance::numeric, 1)                                            AS daily_balance,
+                ROUND(AVG(calories_consumed) OVER w7::numeric, 1)                          AS rolling_7d_avg_consumed,
+                ROUND(AVG(calories_burned)   OVER w7::numeric, 1)                          AS rolling_7d_avg_burned,
+                ROUND(AVG(daily_balance)     OVER w7::numeric, 1)                          AS rolling_7d_avg_balance,
+                ROUND((AVG(daily_balance) OVER w7 * 7.0 / 7700.0)::numeric, 3)            AS rolling_7d_expected_weight_change_kg
+            FROM daily_balance
+            WINDOW w7 AS (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
+        )
+        SELECT
+            r.date,
+            r.calories_consumed,
+            r.calories_burned,
+            r.daily_balance,
+            r.rolling_7d_avg_consumed,
+            r.rolling_7d_avg_burned,
+            r.rolling_7d_avg_balance,
+            r.rolling_7d_expected_weight_change_kg,
+            w_now.weight_kg,
+            w_ago.weight_kg                                                                 AS weight_7d_ago_kg,
+            ROUND((w_now.weight_kg - w_ago.weight_kg)::numeric, 2)                        AS actual_7d_weight_change_kg
+        FROM rolling r
+        LEFT JOIN LATERAL (
+            SELECT weight_kg FROM body_measurements
+            WHERE user_id = %s AND date <= r.date
+            ORDER BY date DESC LIMIT 1
+        ) w_now ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT weight_kg FROM body_measurements
+            WHERE user_id = %s AND date <= r.date - INTERVAL '7 days'
+            ORDER BY date DESC LIMIT 1
+        ) w_ago ON TRUE
+        ORDER BY r.date
+    """
+    # Append user_id twice for the LATERAL subqueries
+    with get_connection() as conn:
+        rows = conn.execute(sql, [user_id] + params + [user_id, user_id]).fetchall()
     return [dict(row) for row in rows]

@@ -34,7 +34,7 @@ python -m sync.withings_auth
 python -m agent.agent
 
 # Inline question
-python -m agent.agent "Does my calorie intake correlate with changes in my body composition?"
+python -m agent.agent "How does recovery impact my workout performance"
 "
 ```
 

@@ -109,6 +109,15 @@ class WhoopClient:
             params["end"] = end
         yield from self._iter_collection("/developer/v2/activity/sleep", params)
 
+    def iter_workouts(self, start: str | None = None, end: str | None = None) -> Iterator[dict]:
+        """Yield all workout/activity records (strain, sport, HR zones, calories)."""
+        params: dict = {}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        yield from self._iter_collection("/developer/v2/activity/workout", params)
+
     def __enter__(self) -> "WhoopClient":
         return self
 

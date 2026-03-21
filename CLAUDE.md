@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Personal health analytics app that syncs data from three APIs into a local SQLite database, then uses a LangChain ReAct agent to generate cross-domain insights.
+Personal health analytics app that syncs data from three APIs into a PostgreSQL database, then uses a LangChain ReAct agent to generate cross-domain insights.
 
 **Data sources (in order of priority):**
 - **Hevy** — workouts (exercises, sets, reps, weight) ✅ implemented
@@ -33,18 +33,20 @@ All sync scripts are idempotent — safe to re-run. They process workouts oldest
 ## Project structure
 
 ```
-clients/    # Thin API clients (httpx, pagination only — no business logic)
-db/         # schema.py: SQLite init and get_connection()
-sync/       # One module per data source; fetches, transforms, and upserts into SQLite
-analytics/  # Query functions over SQLite views; returns list[dict] for agent consumption
-agent/      # (future) LangChain ReAct agent and tools
+clients/         # Thin API clients (httpx, pagination only — no business logic)
+db/              # schema.py: Postgres init and get_connection()
+db/queries/      # Raw SQL fetcher functions (metrics.py) used by analytics layer
+sync/            # One module per data source; fetches, transforms, and upserts into Postgres
+analytics/       # Query functions over Postgres views; returns list[dict] for agent consumption
+agent/           # LangChain ReAct agent and tools
 ```
 
 ## Database
 
-Single file: `health_coach.db` (auto-created on first sync, gitignored).
+PostgreSQL via `DATABASE_URL` in `.env`. Run `docker compose up -d db` locally.
+Schema is in `db/postgres_schema.sql` (idempotent — safe to re-run via `db/schema.py:init_db()`).
 
-Schema: `workouts → exercises → sets` (cascade deletes).
+Core strength schema: `workouts → exercises → sets` (cascade deletes).
 
 Key fields on `sets`:
 - `estimated_1rm` — Epley formula: `weight_kg × (1 + reps/30)`, NULL for reps=0 or missing weight
@@ -65,4 +67,4 @@ Baselines query only already-committed rows, which is why workouts must be proce
 1. Add credentials to `.env.example`
 2. Create `clients/<source>.py` — pagination + auth only
 3. Create `sync/<source>.py` — fetch → transform → upsert pattern matching `sync/hevy.py`
-4. Add new tables to `db/schema.py` `_CREATE_TABLES`
+4. Add new tables to `db/postgres_schema.sql`
