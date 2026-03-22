@@ -16,3 +16,7 @@ build/
 
 # Claude
 .claude/
+
+# Node / UI
+ui/node_modules/
+ui/dist/
