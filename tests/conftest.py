@@ -211,11 +211,29 @@ def _seed(conn: psycopg.Connection) -> None:
         (user_id, user_id),
     )
 
+    # ------------------------------------------------------------------
+    # Simple goal — direct action (no protocol)
+    # ------------------------------------------------------------------
+    goal2_id = conn.execute(
+        "INSERT INTO goals (user_id, raw_input, goal_text, domains, target_date) "
+        "VALUES (%s, 'Eat 30g fiber per day', 'Eat an average of 30g fiber per day', "
+        "'[\"nutrition\"]'::jsonb, '2024-08-01') RETURNING id",
+        (user_id,),
+    ).fetchone()["id"]
+
+    direct_action_id = conn.execute(
+        "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+        "VALUES (%s, %s, 'Eat at least 30g fiber per day', 'fiber_g', 'greater_than', 30, 'cronometer', 'daily') RETURNING id",
+        (goal2_id, user_id),
+    ).fetchone()["id"]
+
     # store these for tests that need them
     conn._test_ids = {
         "user_id": user_id,
         "goal_id": goal_id,
+        "goal2_id": goal2_id,
         "protocol_id": protocol_id,
         "action1_id": action1_id,
         "action2_id": action2_id,
+        "direct_action_id": direct_action_id,
     }

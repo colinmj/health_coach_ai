@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import psycopg
 
 from db.schema import get_connection
-from analytics.goals import get_active_protocols_with_actions
+from analytics.goals import get_active_protocols_with_actions, get_active_direct_actions
 from db.queries.metrics import (
     fetch_nutrition_metric,
     fetch_workout_frequency,
@@ -109,6 +109,41 @@ def run_compliance_check(
 
                 results.append({
                     "protocol_id": protocol["id"],
+                    "action_id": action["id"],
+                    "action_text": action["action_text"],
+                    "metric": action["metric"],
+                    "condition": action["condition"],
+                    "target_value": float(action["target_value"]),
+                    "actual_value": actual,
+                    "met": met,
+                    "week_start_date": week_start.isoformat(),
+                })
+
+        # Second pass: direct goal actions (no protocol)
+        # Skip if caller filtered to a specific protocol — filter doesn't apply here.
+        if protocol_id is None:
+            direct_actions = get_active_direct_actions(user_id)
+            for action in direct_actions:
+                computed = compute_compliance_for_action(conn, action, week_start)
+                actual = computed["actual_value"]
+                met = computed["met"]
+
+                conn.execute(
+                    """
+                    INSERT INTO action_compliance
+                        (action_id, user_id, week_start_date, target_value, actual_value, met, checked_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (action_id, week_start_date) DO UPDATE
+                        SET actual_value = EXCLUDED.actual_value,
+                            met = EXCLUDED.met,
+                            checked_at = NOW()
+                    """,
+                    (action["id"], user_id, week_start, action["target_value"], actual, met),
+                )
+
+                results.append({
+                    "protocol_id": None,
+                    "goal_id": action["goal_id"],
                     "action_id": action["id"],
                     "action_text": action["action_text"],
                     "metric": action["metric"],

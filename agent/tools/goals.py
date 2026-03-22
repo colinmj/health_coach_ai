@@ -1,5 +1,6 @@
 import datetime
 import json
+import re
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -48,18 +49,29 @@ def create_goal(
 
     protocol_resp = llm.invoke([
         SystemMessage(content=(
-            "You are a health protocol designer. Given a confirmed health goal, generate a "
-            "structured 4-8 week protocol with 2-3 measurable weekly actions.\n\n"
+            "You are a health protocol designer. Given a confirmed health goal, decide whether "
+            "it is 'simple' or 'complex', then generate the appropriate structure.\n\n"
             f"Today: {today}. Active data sources: {active_sources}.\n\n"
-            "Rules:\n"
+            "Use 'simple' when the goal maps to a single measurable metric with a clear numeric "
+            "target and no multi-step strategy is needed "
+            "(e.g. 'eat 30g fiber/day', 'drink 2L water/day', 'sleep 8h/night').\n"
+            "Use 'complex' when multiple interdependent actions are needed or the goal benefits "
+            "from a rationale or adaptive strategy "
+            "(e.g. 'increase bench press 1RM', 'lose 5kg body fat').\n\n"
+            "Rules for actions:\n"
             "- Each action must be measurable against one of the active data sources.\n"
-            "- metric must be one of: calories, protein_g, carbs_g, fat_g, "
+            "- metric must be one of: calories, protein_g, carbs_g, fat_g, fiber_g, "
             "workout_frequency, activity_frequency, running_frequency.\n"
-            "- If no insights exist, base the protocol on established best practices for the goal.\n"
-            "- If insights exist, incorporate them into the protocol rationale.\n"
-            "- review_date should be 4 weeks from today.\n"
-            "- Return only valid JSON, no other text:\n"
-            '{"protocol_text": "...", "review_date": "YYYY-MM-DD", '
+            "- Simple goals: 1 action. Complex goals: 2-3 actions.\n"
+            "- If insights exist, incorporate them into complex protocol rationale.\n"
+            "- For complex goals, review_date should be 4 weeks from today.\n\n"
+            "Return only raw JSON. No markdown, no code fences, no commentary — just the JSON object.\n"
+            "Simple: "
+            '{"type": "simple", "actions": [{"action_text": "...", "metric": "...", '
+            '"condition": "less_than|greater_than|equals", '
+            '"target_value": <number>, "data_source": "...", "frequency": "daily|weekly"}]}\n'
+            "Complex: "
+            '{"type": "complex", "title": "3-6 word protocol name", "protocol_text": "...", "review_date": "YYYY-MM-DD", '
             '"actions": [{"action_text": "...", "metric": "...", '
             '"condition": "less_than|greater_than|equals", '
             '"target_value": <number>, "data_source": "...", "frequency": "daily|weekly"}]}'
@@ -67,13 +79,20 @@ def create_goal(
         HumanMessage(content=f"Goal: {goal_text}\nActive insights: {insights_text}"),
     ])
     try:
-        protocol_data = json.loads(str(protocol_resp.content))
+        content = str(protocol_resp.content)
+        # Extract JSON from markdown code fences if present; take the last block
+        blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", content)
+        if blocks:
+            content = blocks[-1].strip()
+        protocol_data = json.loads(content)
     except json.JSONDecodeError:
-        return f"Failed to parse protocol. LLM returned: {protocol_resp.content}"
+        return f"Failed to parse response. LLM returned: {protocol_resp.content}"
+
+    goal_type = protocol_data.get("type", "complex")
 
     # Validate actions
     valid_metrics = {
-        "calories", "protein_g", "carbs_g", "fat_g",
+        "calories", "protein_g", "carbs_g", "fat_g", "fiber_g",
         "workout_frequency", "activity_frequency", "running_frequency",
     }
     actions = [
@@ -104,36 +123,58 @@ def create_goal(
         assert goal_row is not None
         goal_id = goal_row["id"]
 
-        # Insert protocol
-        protocol_row = conn.execute(
-            "INSERT INTO protocols (user_id, goal_id, insight_ids, protocol_text, start_date, review_date) "
-            "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s) RETURNING id",
-            (user_id, goal_id, protocol_data["protocol_text"], today, protocol_data["review_date"]),
-        ).fetchone()
-        assert protocol_row is not None
-        protocol_id = protocol_row["id"]
+        if goal_type == "simple":
+            # Direct actions — no protocol needed
+            inserted_actions = []
+            for a in actions:
+                conn.execute(
+                    "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (goal_id, user_id, a["action_text"], a["metric"], a["condition"],
+                     a["target_value"], a["data_source"], a.get("frequency", "daily")),
+                )
+                inserted_actions.append(a)
 
-        # Insert actions
-        inserted_actions = []
-        for a in actions:
-            conn.execute(
-                "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (protocol_id, user_id, a["action_text"], a["metric"], a["condition"],
-                 a["target_value"], a["data_source"], a.get("frequency", "daily")),
-            )
-            inserted_actions.append(a)
+            return json.dumps({
+                "goal_id": goal_id,
+                "goal_text": goal_text,
+                "domains": parsed_domains,
+                "target_date": target_date_val,
+                "actions": inserted_actions,
+            })
 
-    return json.dumps({
-        "goal_id": goal_id,
-        "goal_text": goal_text,
-        "domains": parsed_domains,
-        "target_date": target_date_val,
-        "protocol_id": protocol_id,
-        "protocol_text": protocol_data["protocol_text"],
-        "review_date": protocol_data["review_date"],
-        "actions": inserted_actions,
-    })
+        else:
+            # Complex goal — insert protocol then actions
+            protocol_title = protocol_data.get("title", "")
+            protocol_row = conn.execute(
+                "INSERT INTO protocols (user_id, goal_id, insight_ids, title, protocol_text, start_date, review_date) "
+                "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s, %s) RETURNING id",
+                (user_id, goal_id, protocol_title, protocol_data["protocol_text"], today, protocol_data["review_date"]),
+            ).fetchone()
+            assert protocol_row is not None
+            protocol_id = protocol_row["id"]
+
+            inserted_actions = []
+            for a in actions:
+                conn.execute(
+                    "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (protocol_id, user_id, a["action_text"], a["metric"], a["condition"],
+                     a["target_value"], a["data_source"], a.get("frequency", "daily")),
+                )
+                inserted_actions.append(a)
+
+            return json.dumps({
+                "goal_id": goal_id,
+                "goal_text": goal_text,
+                "domains": parsed_domains,
+                "target_date": target_date_val,
+                "protocol_id": protocol_id,
+                "protocol_title": protocol_title,
+                "protocol_text": protocol_data["protocol_text"],
+                "review_date": protocol_data["review_date"],
+                "actions": inserted_actions,
+            })
 
 
 @tool

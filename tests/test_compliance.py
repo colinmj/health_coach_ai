@@ -148,5 +148,44 @@ def test_run_compliance_check_upsert_no_duplicates(db):
         "SELECT COUNT(*) AS n FROM action_compliance WHERE user_id = %s",
         (ids["user_id"],),
     ).fetchone()["n"]
-    # 2 actions × 1 week = 2 rows (no duplicates)
-    assert count == 2
+    # 2 protocol actions + 1 direct action × 1 week = 3 rows (no duplicates)
+    assert count == 3
+
+
+def test_run_compliance_check_includes_direct_actions(db):
+    """run_compliance_check includes direct goal actions (no protocol) in results."""
+    from unittest.mock import patch
+    import datetime as dt
+
+    ids = db._test_ids
+    fixed_today = dt.date(2024, 1, 15)  # Monday
+
+    with patch("analytics.compliance.date") as mock_date:
+        mock_date.today.return_value = fixed_today
+        mock_date.side_effect = lambda *a, **kw: dt.date(*a, **kw)
+
+        results = compliance.run_compliance_check(ids["user_id"])
+
+    direct = [r for r in results if r["protocol_id"] is None]
+    assert len(direct) == 1
+    assert direct[0]["action_id"] == ids["direct_action_id"]
+    assert direct[0]["goal_id"] == ids["goal2_id"]
+    assert direct[0]["metric"] == "fiber_g"
+
+
+def test_run_compliance_check_protocol_filter_excludes_direct_actions(db):
+    """When filtering by protocol_id, direct actions are not included."""
+    from unittest.mock import patch
+    import datetime as dt
+
+    ids = db._test_ids
+    fixed_today = dt.date(2024, 1, 15)  # Monday
+
+    with patch("analytics.compliance.date") as mock_date:
+        mock_date.today.return_value = fixed_today
+        mock_date.side_effect = lambda *a, **kw: dt.date(*a, **kw)
+
+        results = compliance.run_compliance_check(ids["user_id"], protocol_id=ids["protocol_id"])
+
+    assert all(r["protocol_id"] == ids["protocol_id"] for r in results)
+    assert len(results) == 2

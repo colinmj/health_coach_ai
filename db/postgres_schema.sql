@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     height_cm     REAL,
     weight_kg     REAL,        -- latest value, updated by body composition sync
     fat_ratio     REAL,        -- latest value, updated by body composition sync
+    units         TEXT        NOT NULL DEFAULT 'metric' CHECK (units IN ('metric', 'imperial')),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -29,6 +30,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS sex           TEXT CHECK (sex IN ('ma
 ALTER TABLE users ADD COLUMN IF NOT EXISTS height_cm     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS weight_kg     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS fat_ratio     REAL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS units         TEXT NOT NULL DEFAULT 'metric' CHECK (units IN ('metric', 'imperial'));
 
 -- One row per (user, domain). Stores OAuth tokens and tracks which source is
 -- active for each domain (strength, recovery, body_composition, nutrition).
@@ -291,9 +293,6 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Drop old insights table (incompatible schema, no data)
-DROP TABLE IF EXISTS insights CASCADE;
-
 CREATE TABLE IF NOT EXISTS insights (
     id               SERIAL      PRIMARY KEY,
     user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -344,7 +343,8 @@ CREATE TABLE IF NOT EXISTS protocols (
 
 CREATE TABLE IF NOT EXISTS actions (
     id           SERIAL      PRIMARY KEY,
-    protocol_id  INTEGER     NOT NULL REFERENCES protocols(id) ON DELETE CASCADE,
+    protocol_id  INTEGER     REFERENCES protocols(id) ON DELETE CASCADE,
+    goal_id      INTEGER     REFERENCES goals(id) ON DELETE CASCADE,
     user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     action_text  TEXT        NOT NULL,
     metric       TEXT        NOT NULL,
@@ -353,7 +353,11 @@ CREATE TABLE IF NOT EXISTS actions (
     data_source  TEXT        NOT NULL,
     frequency    TEXT        NOT NULL DEFAULT 'daily'
                              CHECK (frequency IN ('daily','weekly')),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT actions_check_parent CHECK (
+        (protocol_id IS NOT NULL AND goal_id IS NULL) OR
+        (protocol_id IS NULL AND goal_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS action_compliance (
@@ -396,6 +400,20 @@ CREATE INDEX IF NOT EXISTS idx_compliance_action_week     ON action_compliance (
 -- One active protocol per goal (DB-level guard)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_protocols_one_active_per_goal
     ON protocols (goal_id) WHERE (status = 'active');
+
+-- Migrate: allow direct goal→action (no protocol required)
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS goal_id INTEGER REFERENCES goals(id) ON DELETE CASCADE;
+ALTER TABLE actions ALTER COLUMN protocol_id DROP NOT NULL;
+ALTER TABLE actions DROP CONSTRAINT IF EXISTS actions_check_parent;
+ALTER TABLE actions ADD CONSTRAINT actions_check_parent CHECK (
+    (protocol_id IS NOT NULL AND goal_id IS NULL) OR
+    (protocol_id IS NULL AND goal_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_actions_goal_id ON actions (goal_id);
+
+-- Migrate: add human-readable title to protocols
+ALTER TABLE protocols ADD COLUMN IF NOT EXISTS title TEXT;
 
 
 -- -----------------------------------------------------------------------------

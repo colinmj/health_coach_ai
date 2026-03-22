@@ -95,12 +95,18 @@ def get_goals_with_protocols_and_actions(user_id: int) -> list[dict]:
                 p.updated_at AS p_updated_at,
                 a.id AS action_id, a.protocol_id AS a_protocol_id, a.user_id AS a_user_id,
                 a.action_text, a.metric, a.condition, a.target_value,
-                a.data_source, a.frequency, a.created_at AS a_created_at
+                a.data_source, a.frequency, a.created_at AS a_created_at,
+                da.id AS da_id, da.user_id AS da_user_id,
+                da.action_text AS da_action_text, da.metric AS da_metric,
+                da.condition AS da_condition, da.target_value AS da_target_value,
+                da.data_source AS da_data_source, da.frequency AS da_frequency,
+                da.created_at AS da_created_at
             FROM goals g
             LEFT JOIN protocols p ON p.goal_id = g.id
             LEFT JOIN actions a ON a.protocol_id = p.id
+            LEFT JOIN actions da ON da.goal_id = g.id AND da.protocol_id IS NULL
             WHERE g.user_id = %s
-            ORDER BY g.id, p.id, a.id
+            ORDER BY g.id, p.id, a.id, da.id
             """,
             (user_id,),
         ).fetchall()
@@ -121,6 +127,7 @@ def get_goals_with_protocols_and_actions(user_id: int) -> list[dict]:
                     "created_at": row["g_created_at"],
                     "updated_at": row["g_updated_at"],
                     "protocols": {},
+                    "direct_actions": {},
                 }
             if row["protocol_id"] is not None:
                 protocols = goals_map[gid]["protocols"]
@@ -154,9 +161,37 @@ def get_goals_with_protocols_and_actions(user_id: int) -> list[dict]:
                         "frequency": row["frequency"],
                         "created_at": row["a_created_at"],
                     })
+            if row["da_id"] is not None:
+                goals_map[gid]["direct_actions"][row["da_id"]] = {
+                    "id": row["da_id"],
+                    "goal_id": gid,
+                    "user_id": row["da_user_id"],
+                    "action_text": row["da_action_text"],
+                    "metric": row["da_metric"],
+                    "condition": row["da_condition"],
+                    "target_value": row["da_target_value"],
+                    "data_source": row["da_data_source"],
+                    "frequency": row["da_frequency"],
+                    "created_at": row["da_created_at"],
+                }
 
         result = []
         for g in goals_map.values():
             g["protocols"] = list(g["protocols"].values())
+            g["direct_actions"] = list(g["direct_actions"].values())
             result.append(g)
         return result
+
+
+def get_active_direct_actions(user_id: int) -> list[dict]:
+    with get_connection() as conn:
+        return conn.execute(
+            """
+            SELECT a.*
+            FROM actions a
+            JOIN goals g ON g.id = a.goal_id
+            WHERE a.user_id = %s AND a.goal_id IS NOT NULL AND g.status = 'active'
+            ORDER BY a.id
+            """,
+            (user_id,),
+        ).fetchall()

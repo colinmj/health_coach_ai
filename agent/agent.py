@@ -45,7 +45,8 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
         if g.get("target_date"):
             lines.append(f"  Target date: {g['target_date']}")
         for p in g.get("protocols", []):
-            lines.append(f"  Protocol (id={p['id']}, status={p['status']}): {p['protocol_text']}")
+            protocol_label = p.get("title") or f"id={p['id']}"
+            lines.append(f"  Protocol ({protocol_label}, status={p['status']}): {p['protocol_text']}")
             review = p.get("review_date")
             if review:
                 lines.append(f"    Review date: {review}")
@@ -134,6 +135,13 @@ Signals that mean **Whoop activity**:
 If none of the above signals are present, you MUST ask the user before calling any tool: \
 "Are you asking about your strength training (Hevy) or a sport/activity logged in Whoop \
 (e.g. powerlifting, kickboxing)?" Do NOT default to Hevy.
+
+## Scope
+Your focus is health, fitness, nutrition, sleep, recovery, and athletic performance. This includes general questions, training programs, recipes, research, and anything else within that domain. You can and should engage with these topics even when they're not about the user's own data.
+
+For injury or medical concerns, provide general information but recommend the user consult a professional — do not diagnose or prescribe.
+
+If a request falls clearly outside this scope, decline briefly and redirect: "I'm focused on health and performance — let me know if there's anything in that area I can help with."
 
 ## Rules
 1. Always call a tool before stating a number — never invent data.
