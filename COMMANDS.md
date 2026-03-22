@@ -28,6 +28,26 @@ python -m sync.whoop_auth
 python -m sync.withings_auth
 ```
 
+## API server
+
+```bash
+# Terminal 1 — activate venv first
+source .venv/bin/activate
+uvicorn api.main:app --reload
+# → http://localhost:8000
+```
+
+## UI (dev)
+
+```bash
+# Terminal 2
+cd ui
+npm run dev
+# → http://localhost:5173
+```
+
+Vite proxies `/api/*` → `http://localhost:8000`, so both must be running.
+
 ## Agent
 ```bash
 # Interactive prompt
