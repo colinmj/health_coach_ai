@@ -49,7 +49,7 @@ def sync_status() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT domain, source, last_synced_at, is_active
+            SELECT domain, source, load_type, last_synced_at, is_active
             FROM user_integrations
             WHERE user_id = %s
             ORDER BY domain

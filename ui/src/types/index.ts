@@ -20,6 +20,54 @@ export interface StreamEvent {
   error?: string
 }
 
-export interface SyncStatus {
-  [source: string]: string | null
+export interface Action {
+  id: number
+  action_text: string
+  metric: string | null
+  condition: string | null
+  target_value: number | null
+  data_source: string | null
+  frequency: string | null
+  created_at: string
+}
+
+export interface Protocol {
+  id: number
+  goal_id: number
+  protocol_text: string
+  start_date: string | null
+  review_date: string | null
+  status: string
+  outcome: string | null
+  actions: Action[]
+}
+
+export interface Goal {
+  id: number
+  goal_text: string
+  domains: string[] | null
+  target_date: string | null
+  status: string
+  created_at: string
+  protocols: Protocol[]
+  direct_actions: Action[]
+}
+
+export interface Insight {
+  id: number
+  insight: string
+  correlative_tool: string | null
+  effect: string | null
+  confidence: string | null
+  date_derived: string
+  status: string
+  pinned: boolean
+}
+
+export interface SyncIntegration {
+  domain: string
+  source: string
+  load_type: 'sync' | 'upload'
+  last_synced_at: string | null
+  is_active: boolean
 }

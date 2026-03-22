@@ -67,4 +67,22 @@ def get_local_user_id() -> int:
             """,
         ).fetchone()
         assert row is not None
-        return row["id"]
+        user_id = row["id"]
+
+        # Seed integration rows so the UI can show status before any sync runs.
+        # ON CONFLICT does nothing — preserves last_synced_at once populated.
+        conn.execute(
+            """
+            INSERT INTO user_integrations (user_id, domain, source, load_type) VALUES
+                (%s, 'strength',         'hevy',        'sync'),
+                (%s, 'recovery',         'whoop',       'sync'),
+                (%s, 'body_composition', 'withings',    'sync'),
+                (%s, 'nutrition',        'cronometer',  'upload')
+            ON CONFLICT (user_id, domain) DO UPDATE SET
+                source    = EXCLUDED.source,
+                load_type = EXCLUDED.load_type
+            """,
+            (user_id, user_id, user_id, user_id),
+        )
+
+        return user_id

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS user_integrations (
     user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     domain           TEXT        NOT NULL,  -- 'strength' | 'recovery' | 'body_composition' | 'nutrition'
     source           TEXT        NOT NULL,  -- 'hevy' | 'whoop' | 'withings' | 'cronometer'
+    load_type        TEXT        NOT NULL DEFAULT 'sync' CHECK (load_type IN ('sync', 'upload')),
     is_active        BOOLEAN     NOT NULL DEFAULT TRUE,
     access_token     TEXT,
     refresh_token    TEXT,
@@ -47,6 +48,9 @@ CREATE TABLE IF NOT EXISTS user_integrations (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, domain)
 );
+
+-- Migrate: add load_type if upgrading from a pre-load_type schema
+ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS load_type TEXT NOT NULL DEFAULT 'sync' CHECK (load_type IN ('sync', 'upload'));
 
 
 -- -----------------------------------------------------------------------------

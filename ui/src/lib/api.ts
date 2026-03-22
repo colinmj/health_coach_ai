@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { Message, Session, StreamEvent, SyncStatus } from '@/types'
+import type { Message, Session, StreamEvent, SyncIntegration, Goal, Insight } from '@/types'
 
 const BASE = '/api'
 
@@ -15,7 +15,7 @@ export async function getMessages(sessionId: number): Promise<Message[]> {
   return res.json()
 }
 
-export async function getSyncStatus(): Promise<SyncStatus> {
+export async function getSyncStatus(): Promise<SyncIntegration[]> {
   const res = await fetch(`${BASE}/sync/status`)
   if (!res.ok) throw new Error('Failed to fetch sync status')
   return res.json()
@@ -24,6 +24,24 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 export async function triggerSync(): Promise<void> {
   const res = await fetch(`${BASE}/sync/trigger`, { method: 'POST' })
   if (!res.ok) throw new Error('Failed to trigger sync')
+}
+
+export async function getGoals(): Promise<Goal[]> {
+  const res = await fetch(`${BASE}/goals/`)
+  if (!res.ok) throw new Error('Failed to fetch goals')
+  return res.json()
+}
+
+export async function getGoal(id: number): Promise<Goal> {
+  const res = await fetch(`${BASE}/goals/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch goal')
+  return res.json()
+}
+
+export async function getInsights(): Promise<Insight[]> {
+  const res = await fetch(`${BASE}/insights/`)
+  if (!res.ok) throw new Error('Failed to fetch insights')
+  return res.json()
 }
 
 export function streamChat(

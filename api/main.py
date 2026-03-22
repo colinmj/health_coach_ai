@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import chat, sessions, sync
+from api.routers import chat, sessions, sync, goals, insights
 
 load_dotenv()
 
@@ -18,6 +18,8 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(sync.router)
+app.include_router(goals.router)
+app.include_router(insights.router)
 
 
 @app.get("/health")
