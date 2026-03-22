@@ -41,11 +41,12 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
         return lines
 
     for g in goals:
-        lines.append(f"### Goal (id={g['id']}, status={g['status']}): {g['goal_text']}")
+        goal_label = g.get("title") or g["goal_text"]
+        lines.append(f"### Goal ({goal_label}, status={g['status']})")
         if g.get("target_date"):
             lines.append(f"  Target date: {g['target_date']}")
         for p in g.get("protocols", []):
-            protocol_label = p.get("title") or f"id={p['id']}"
+            protocol_label = p.get("title") or "protocol"
             lines.append(f"  Protocol ({protocol_label}, status={p['status']}): {p['protocol_text']}")
             review = p.get("review_date")
             if review:
@@ -58,11 +59,11 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
                     actual = comp["actual_value"] if comp["actual_value"] is not None else "no data"
                     met_str = {True: "✅", False: "❌", None: "—"}.get(comp["met"], "—")
                     lines.append(
-                        f"    Action (id={a['id']}): {a['action_text']} "
+                        f"    Action: {a['action_text']} "
                         f"[{met_str} actual={actual}, target={a['target_value']}]"
                     )
                 else:
-                    lines.append(f"    Action (id={a['id']}): {a['action_text']} [no compliance data yet]")
+                    lines.append(f"    Action: {a['action_text']} [no compliance data yet]")
     return lines
 
 
@@ -142,6 +143,11 @@ Your focus is health, fitness, nutrition, sleep, recovery, and athletic performa
 For injury or medical concerns, provide general information but recommend the user consult a professional — do not diagnose or prescribe.
 
 If a request falls clearly outside this scope, decline briefly and redirect: "I'm focused on health and performance — let me know if there's anything in that area I can help with."
+
+## Referring to goals, insights, and actions
+Never refer to a goal, insight, protocol, or action by its database ID.
+Always use the goal's title or goal text, the insight's title or first sentence, \
+or the action's action_text when referencing them in conversation.
 
 ## Rules
 1. Always call a tool before stating a number — never invent data.

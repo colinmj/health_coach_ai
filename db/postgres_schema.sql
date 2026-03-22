@@ -419,6 +419,10 @@ CREATE INDEX IF NOT EXISTS idx_actions_goal_id ON actions (goal_id);
 -- Migrate: add human-readable title to protocols
 ALTER TABLE protocols ADD COLUMN IF NOT EXISTS title TEXT;
 
+-- Migrate: add short title to goals and insights
+ALTER TABLE goals    ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE insights ADD COLUMN IF NOT EXISTS title TEXT;
+
 
 -- -----------------------------------------------------------------------------
 -- Views  (scoped to user_id — app layer always filters by user_id)

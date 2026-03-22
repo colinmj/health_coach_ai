@@ -44,6 +44,7 @@ export interface Protocol {
 
 export interface Goal {
   id: number
+  title: string | null
   goal_text: string
   domains: string[] | null
   target_date: string | null
@@ -55,6 +56,7 @@ export interface Goal {
 
 export interface Insight {
   id: number
+  title: string | null
   insight: string
   correlative_tool: string | null
   effect: string | null
@@ -62,6 +64,7 @@ export interface Insight {
   date_derived: string
   status: string
   pinned: boolean
+  created_at: string
 }
 
 export interface SyncIntegration {

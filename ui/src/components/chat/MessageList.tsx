@@ -1,9 +1,30 @@
 import { useEffect, useRef } from 'react'
 import Markdown from 'markdown-to-jsx'
 import { useChatStore } from '@/stores/chatStore'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+
+function TypingIndicator({ tool }: { tool: string | null }) {
+  return (
+    <div className="flex justify-start">
+      <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-3">
+        <div className="flex items-center gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce"
+              style={{ animationDelay: `${i * 150}ms`, animationDuration: '900ms' }}
+            />
+          ))}
+        </div>
+        {tool && (
+          <span className="text-xs text-muted-foreground capitalize">
+            {tool.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function MessageList() {
   const { messages, isStreaming, streamingTool } = useChatStore()
@@ -64,18 +85,8 @@ export function MessageList() {
         </div>
       ))}
 
-      {isStreaming && streamingTool && (
-        <div className="flex justify-start">
-          <Badge variant="secondary" className="animate-pulse text-xs">
-            {streamingTool}...
-          </Badge>
-        </div>
-      )}
-
-      {isStreaming && !streamingTool && messages[messages.length - 1]?.role !== 'ai' && (
-        <div className="flex justify-start gap-2">
-          <Skeleton className="h-4 w-48 rounded-full" />
-        </div>
+      {isStreaming && messages[messages.length - 1]?.role !== 'ai' && (
+        <TypingIndicator tool={streamingTool} />
       )}
 
       <div ref={bottomRef} />

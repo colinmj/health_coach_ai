@@ -16,6 +16,7 @@ from agent.tools._config import _DOMAIN_ALLOWLIST, _CONFIDENCE_RANK, DEFAULT_SOU
 def create_goal(
     goal_text: str,
     domains: str,
+    title: str = "",
     target_date: str = "",
 ) -> str:
     """Save a confirmed health goal and generate a protocol with measurable actions.
@@ -24,6 +25,7 @@ def create_goal(
     goal_text: the final, specific, measurable goal statement.
     domains: JSON array of relevant domains, e.g. '["body_composition","nutrition"]'.
              Valid values: strength, recovery, body_composition, nutrition.
+    title: a short 4-7 word title for the goal (e.g. 'Build deadlift to 200kg').
     target_date: optional YYYY-MM-DD deadline string.
 
     Generates a protocol and 2-3 measurable actions using its own focused prompt.
@@ -41,6 +43,7 @@ def create_goal(
         parsed_domains = []
 
     target_date_val = target_date.strip() or None
+    title_val = title.strip() or None
 
     # Generate protocol + actions with a focused, self-contained system prompt
     active_insights = goals_analytics.get_active_insights(user_id)
@@ -116,9 +119,9 @@ def create_goal(
 
         # Insert goal
         goal_row = conn.execute(
-            "INSERT INTO goals (user_id, raw_input, goal_text, domains, target_date) "
-            "VALUES (%s, %s, %s, %s::jsonb, %s) RETURNING id",
-            (user_id, goal_text, goal_text, json.dumps(parsed_domains), target_date_val),
+            "INSERT INTO goals (user_id, raw_input, goal_text, title, domains, target_date) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb, %s) RETURNING id",
+            (user_id, goal_text, goal_text, title_val, json.dumps(parsed_domains), target_date_val),
         ).fetchone()
         assert goal_row is not None
         goal_id = goal_row["id"]
@@ -191,6 +194,7 @@ def save_insight(
     insight: str,
     effect: str,
     confidence: str,
+    title: str = "",
     session_id: str = "",
 ) -> str:
     """Save a data-derived insight about a health correlation.
@@ -198,6 +202,7 @@ def save_insight(
     insight: the insight text.
     effect: 'positive', 'negative', or 'neutral'.
     confidence: 'strong' or 'moderate'.
+    title: a short 5-8 word title summarising the insight (e.g. 'Sleep boosts next-day strength').
     A stronger insight for the same tool supersedes a weaker one.
     Enforces caps: 7 active total, 3 pinned."""
     user_id = get_local_user_id()
@@ -209,6 +214,7 @@ def save_insight(
 
     today = datetime.date.today().isoformat()
     sid = int(session_id) if session_id.strip() else None
+    title_val = title.strip() or None
 
     with get_connection() as conn:
         counts = conn.execute(
@@ -236,9 +242,9 @@ def save_insight(
                 return "Active insight cap (7) reached. Dismiss an insight before saving a new one."
 
             new_row = conn.execute(
-                "INSERT INTO insights (user_id, session_id, correlative_tool, insight, effect, confidence, date_derived) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (user_id, sid, correlative_tool, insight, effect, confidence, today),
+                "INSERT INTO insights (user_id, session_id, correlative_tool, title, insight, effect, confidence, date_derived) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (user_id, sid, correlative_tool, title_val, insight, effect, confidence, today),
             ).fetchone()
             assert new_row is not None
             new_id = new_row["id"]
@@ -253,9 +259,9 @@ def save_insight(
                 return "Active insight cap (7) reached. Dismiss an insight before saving a new one."
 
             new_row = conn.execute(
-                "INSERT INTO insights (user_id, session_id, correlative_tool, insight, effect, confidence, date_derived) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (user_id, sid, correlative_tool, insight, effect, confidence, today),
+                "INSERT INTO insights (user_id, session_id, correlative_tool, title, insight, effect, confidence, date_derived) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (user_id, sid, correlative_tool, title_val, insight, effect, confidence, today),
             ).fetchone()
             assert new_row is not None
             new_id = new_row["id"]

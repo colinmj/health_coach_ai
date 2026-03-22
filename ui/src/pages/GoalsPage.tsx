@@ -14,7 +14,7 @@ import type { Goal, Insight } from '@/types'
 
 function InsightCard({ insight }: { insight: Insight }) {
   const [open, setOpen] = useState(false)
-  const preview = insight.insight.split(/[.!?]/)[0].trim()
+  const preview = insight.title ?? insight.insight.split(/[.!?]/)[0].trim()
 
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} className="rounded-lg border bg-card text-sm overflow-hidden">
@@ -22,7 +22,7 @@ function InsightCard({ insight }: { insight: Insight }) {
         {insight.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         <span className="flex-1 font-medium text-foreground truncate">{preview}</span>
         <span className="text-xs text-muted-foreground shrink-0">
-          {insight.date_derived ? formatDistanceToNow(new Date(insight.date_derived), { addSuffix: true }) : ''}
+          {formatDistanceToNow(new Date(insight.created_at), { addSuffix: true })}
         </span>
         <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
       </Collapsible.Trigger>
@@ -69,7 +69,7 @@ function GoalCard({ goal }: { goal: Goal }) {
   return (
     <div className="flex items-center gap-3 rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50">
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{goal.goal_text}</p>
+        <p className="text-sm font-medium text-foreground truncate">{goal.title ?? goal.goal_text}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {goal.domains?.map((d) => (
             <Badge key={d} variant="secondary" className="text-xs">{d}</Badge>

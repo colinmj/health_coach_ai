@@ -69,7 +69,7 @@ export function GoalDetailPage() {
 
         {goal && (
           <>
-            <h1 className="text-xl font-semibold mb-3">{goal.goal_text}</h1>
+            <h1 className="text-xl font-semibold mb-3">{goal.title ?? goal.goal_text}</h1>
             <div className="flex flex-wrap gap-2 mb-6">
               {goal.domains?.map((d) => (
                 <Badge key={d} variant="secondary">{d}</Badge>
