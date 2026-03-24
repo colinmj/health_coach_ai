@@ -26,6 +26,17 @@ export async function triggerSync(): Promise<void> {
   if (!res.ok) throw new Error('Failed to trigger sync')
 }
 
+export async function uploadCsvFile(file: File): Promise<{ rows_imported: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/sync/upload-csv`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? 'Upload failed')
+  }
+  return res.json()
+}
+
 export async function getGoals(): Promise<Goal[]> {
   const res = await fetch(`${BASE}/goals/`)
   if (!res.ok) throw new Error('Failed to fetch goals')

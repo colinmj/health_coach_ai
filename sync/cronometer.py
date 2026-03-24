@@ -7,6 +7,7 @@ Each run is idempotent — existing rows are updated, new ones inserted.
 """
 
 import csv
+import io
 import sys
 from pathlib import Path
 
@@ -110,6 +111,59 @@ def _parse_value(col: str, raw: str) -> str | bool | float | None:
         return None
 
 
+def sync_csv_content(content: bytes, user_id: int, conn) -> int:
+    """Parse raw CSV bytes and upsert into nutrition_daily. Returns row count.
+
+    Raises ValueError if the file doesn't look like a Cronometer Daily Summary CSV.
+    """
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+
+    # Build header → db column mapping
+    header_map = {}
+    for h in (reader.fieldnames or []):
+        col = _resolve_header(h)
+        if col:
+            header_map[h] = col
+
+    # Validate: must have Date + at least 3 other recognised columns
+    db_cols = set(header_map.values())
+    if "date" not in db_cols:
+        raise ValueError(
+            'Missing required "Date" column. Please upload a Cronometer Daily Summary CSV.'
+        )
+    if len(db_cols) < 4:
+        raise ValueError(
+            "This doesn't look like a Cronometer Daily Summary CSV — too few recognised columns."
+        )
+
+    count = 0
+    for row in rows:
+        record: dict = {}
+        for csv_header, db_col in header_map.items():
+            record[db_col] = _parse_value(db_col, row.get(csv_header, ""))
+
+        if not record.get("date"):
+            continue
+        record["source"] = "cronometer"
+        record["user_id"] = user_id
+
+        cols = list(record.keys())
+        placeholders = ", ".join(["%s"] * len(cols))
+        updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ("date", "user_id"))
+        sql = (
+            f"INSERT INTO nutrition_daily ({', '.join(cols)}) "
+            f"VALUES ({placeholders}) "
+            f"ON CONFLICT (user_id, date) DO UPDATE SET {updates}, synced_at=NOW()"
+        )
+        conn.execute(sql, list(record.values()))
+        count += 1
+
+    conn.commit()
+    return count
+
+
 def sync_csv(csv_path: str | Path) -> None:
     init_db()
     user_id = get_local_user_id()
@@ -119,43 +173,13 @@ def sync_csv(csv_path: str | Path) -> None:
         print(f"File not found: {csv_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(csv_path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        rows = list(reader)
-
-    # Build header → db column mapping once from the actual CSV headers
-    header_map = {}
-    for h in (reader.fieldnames or []):
-        col = _resolve_header(h)
-        if col:
-            header_map[h] = col
-
-    print(f"Importing {len(rows)} rows from {csv_path.name}…")
+    content = csv_path.read_bytes()
+    print(f"Importing from {csv_path.name}…")
 
     with get_connection() as conn:
-        for row in rows:
-            record: dict = {}
-            for csv_header, db_col in header_map.items():
-                record[db_col] = _parse_value(db_col, row.get(csv_header, ""))
+        count = sync_csv_content(content, user_id, conn)
 
-            if not record.get("date"):
-                continue
-            record["source"] = "cronometer"
-            record["user_id"] = user_id
-
-            cols = list(record.keys())
-            placeholders = ", ".join(["%s"] * len(cols))
-            updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in ("date", "user_id"))
-            sql = (
-                f"INSERT INTO nutrition_daily ({', '.join(cols)}) "
-                f"VALUES ({placeholders}) "
-                f"ON CONFLICT (user_id, date) DO UPDATE SET {updates}, synced_at=NOW()"
-            )
-            conn.execute(sql, list(record.values()))
-            conn.commit()
-            print(f"  ✓ {record['date']}")
-
-    print("Sync complete.")
+    print(f"Sync complete. {count} rows imported.")
 
 
 if __name__ == "__main__":
