@@ -57,11 +57,11 @@ def _upsert_measurement(grp: dict, conn: psycopg.Connection[dict[str, Any]], use
     conn.execute(
         """
         INSERT INTO body_measurements
-            (user_id, withings_group_id, measured_at, date,
+            (user_id, external_id, measured_at, date, source,
              weight_kg, fat_free_mass_kg, fat_ratio, fat_mass_kg,
              muscle_mass_kg, hydration_kg, bone_mass_kg)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (user_id, withings_group_id) DO UPDATE SET
+        VALUES (%s, %s, %s, %s, 'withings', %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, source, external_id) DO UPDATE SET
             measured_at      = EXCLUDED.measured_at,
             date             = EXCLUDED.date,
             weight_kg        = EXCLUDED.weight_kg,
@@ -75,7 +75,7 @@ def _upsert_measurement(grp: dict, conn: psycopg.Connection[dict[str, Any]], use
         """,
         (
             user_id,
-            grp_id,
+            str(grp_id),
             measured_at,
             date,
             columns["weight_kg"],
@@ -94,7 +94,7 @@ def sync_withings() -> None:
     user_id = get_local_user_id()
 
     # Only fetch measurements newer than the last successful sync
-    last = get_last_synced_at(user_id, "body_composition")
+    last = get_last_synced_at(user_id, "withings")
     startdate = int(last.timestamp()) if last else None
     if last:
         print(f"Incremental sync from {last.isoformat()}")
@@ -120,7 +120,7 @@ def sync_withings() -> None:
         conn.commit()
 
     print(f"Body measurements synced: {len(grps)} rows")
-    update_last_synced_at(user_id, "body_composition", "withings")
+    update_last_synced_at(user_id, "withings")
     print("Withings sync complete.")
 
 

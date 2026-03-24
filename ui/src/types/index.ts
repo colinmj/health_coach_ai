@@ -68,10 +68,11 @@ export interface Insight {
 }
 
 export interface SyncIntegration {
-  domain: string
   source: string
-  load_type: 'sync' | 'upload'
+  auth_type: 'oauth' | 'api_key' | 'upload'
   last_synced_at: string | null
   is_active: boolean
   authorized: boolean
+  data_types: string[]
+  label: string
 }

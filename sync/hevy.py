@@ -197,7 +197,7 @@ def sync_workouts() -> None:
 
     # Hevy has no API-level date filter, so we stop paginating early once we
     # hit workouts older than the last sync (API returns newest-first).
-    last = get_last_synced_at(user_id, "strength")
+    last = get_last_synced_at(user_id, "hevy")
     since = last.isoformat() if last else None
     if since:
         print(f"Incremental sync from {since}")
@@ -223,7 +223,7 @@ def sync_workouts() -> None:
             conn.commit()
             print(f"  ✓ {workout.get('title', 'Untitled')}  [{workout['id']}]")
 
-    update_last_synced_at(user_id, "strength", "hevy")
+    update_last_synced_at(user_id, "hevy")
     print("Sync complete.")
 
 

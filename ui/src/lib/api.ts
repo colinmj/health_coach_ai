@@ -43,6 +43,22 @@ export async function loginUser(email: string, password: string): Promise<{ toke
   return res.json()
 }
 
+// Profile
+export async function getProfile(): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${BASE}/profile/`)
+  if (!res.ok) throw new Error('Failed to fetch profile')
+  return res.json()
+}
+
+export async function updateProfile(data: Record<string, unknown>): Promise<void> {
+  const res = await apiFetch(`${BASE}/profile/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update profile')
+}
+
 // Integrations
 export async function getAvailableIntegrations(): Promise<object[]> {
   const res = await apiFetch(`${BASE}/integrations/available`)
@@ -57,6 +73,27 @@ export async function createIntegrations(sources: string[], credentials: Record<
     body: JSON.stringify({ sources, credentials }),
   })
   if (!res.ok) throw new Error('Failed to save integrations')
+  return res.json()
+}
+
+export async function saveDataImports(assignments: Record<string, string>): Promise<{ saved: number }> {
+  const res = await apiFetch(`${BASE}/integrations/data-imports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignments }),
+  })
+  if (!res.ok) throw new Error('Failed to save data imports')
+  return res.json()
+}
+
+export async function deleteIntegration(source: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/integrations/${source}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 204) throw new Error('Failed to disconnect integration')
+}
+
+export async function getDataImports(): Promise<Record<string, string>> {
+  const res = await apiFetch(`${BASE}/integrations/data-imports`)
+  if (!res.ok) throw new Error('Failed to fetch data imports')
   return res.json()
 }
 

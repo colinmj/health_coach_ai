@@ -12,27 +12,32 @@ router = APIRouter(prefix="/sync", tags=["sync"])
 
 
 def _run_pending_syncs(user_id: int) -> None:
-    """Run syncs for any source that is past the throttle window."""
     from db.schema import set_current_user_id
     set_current_user_id(user_id)
 
-    if needs_sync(user_id, "strength"):
-        try:
-            sync_workouts()
-        except Exception as e:
-            print(f"[sync] strength failed: {e}")
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT source FROM user_integrations
+            WHERE user_id = %s AND auth_type IN ('oauth', 'api_key') AND is_active = TRUE
+            """,
+            (user_id,),
+        ).fetchall()
 
-    if needs_sync(user_id, "recovery"):
-        try:
-            sync_whoop()
-        except Exception as e:
-            print(f"[sync] recovery failed: {e}")
+    connected = {row["source"] for row in rows}
 
-    if needs_sync(user_id, "body_composition"):
-        try:
-            sync_withings()
-        except Exception as e:
-            print(f"[sync] body_composition failed: {e}")
+    _SYNC_HANDLERS = {
+        "hevy":     sync_workouts,
+        "whoop":    sync_whoop,
+        "withings": sync_withings,
+    }
+
+    for source, handler in _SYNC_HANDLERS.items():
+        if source in connected and needs_sync(user_id, source):
+            try:
+                handler()
+            except Exception as e:
+                print(f"[sync] {source} failed: {e}")
 
 
 @router.post("/trigger")
@@ -71,16 +76,25 @@ async def upload_csv(
 
 @router.get("/status")
 def sync_status(user_id: int = Depends(get_current_user_id)) -> list[dict]:
-    """Return last_synced_at for each connected source."""
+    from api.routers.integrations import _SOURCE_META
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT domain, source, load_type, last_synced_at, is_active,
+            SELECT source, auth_type, last_synced_at, is_active,
                    (access_token IS NOT NULL) AS authorized
             FROM user_integrations
             WHERE user_id = %s
-            ORDER BY domain
+            ORDER BY source
             """,
             (user_id,),
         ).fetchall()
-    return list(rows)
+
+    result = []
+    for row in rows:
+        meta = _SOURCE_META.get(row["source"], {})
+        result.append({
+            **dict(row),
+            "data_types": meta.get("data_types", []),
+            "label": meta.get("label", row["source"]),
+        })
+    return result

@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import auth, chat, oauth, sessions, sync, goals, insights, integrations
+from api.routers import auth, chat, oauth, sessions, sync, goals, insights, integrations, profile
 
 load_dotenv()
 
@@ -24,6 +24,7 @@ app.include_router(sync.router)
 app.include_router(goals.router)
 app.include_router(insights.router)
 app.include_router(integrations.router)
+app.include_router(profile.router)
 
 
 @app.get("/health")

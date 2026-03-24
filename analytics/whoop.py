@@ -29,7 +29,7 @@ def get_activities(
                strain, energy_kcal, avg_heart_rate, max_heart_rate,
                zone_zero_milli, zone_one_milli, zone_two_milli,
                zone_three_milli, zone_four_milli, zone_five_milli
-        FROM whoop_activities
+        FROM cardio_workouts
         {where}
         ORDER BY date
     """
@@ -64,7 +64,7 @@ def list_activity_sports(
             MAX(date) AS last_session,
             ROUND(AVG(strain)::numeric, 1) AS avg_strain,
             ROUND(AVG(energy_kcal)::numeric, 0) AS avg_energy_kcal
-        FROM whoop_activities
+        FROM cardio_workouts
         {where}
         GROUP BY sport_name
         ORDER BY session_count DESC

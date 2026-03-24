@@ -1,4 +1,4 @@
-"""Shared sync utilities: last_synced_at tracking and throttle checks."""
+"""Shared sync utilities: token management, last_synced_at tracking, throttle checks."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -16,33 +16,8 @@ def _parse_dt(value: str | None) -> datetime | None:
     return dt
 
 
-def get_last_synced_at(user_id: int, domain: str) -> datetime | None:
-    """Return the last successful sync time for a domain, or None if never synced."""
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT last_synced_at FROM user_integrations WHERE user_id = %s AND domain = %s",
-            (user_id, domain),
-        ).fetchone()
-    return _parse_dt(row["last_synced_at"]) if row else None
-
-
-def update_last_synced_at(user_id: int, domain: str, source: str) -> None:
-    """Record a successful sync for a domain. Inserts the row if it doesn't exist yet."""
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO user_integrations (user_id, domain, source, last_synced_at)
-            VALUES (%s, %s, %s, NOW())
-            ON CONFLICT (user_id, domain) DO UPDATE SET
-                last_synced_at = NOW(),
-                source = EXCLUDED.source
-            """,
-            (user_id, domain, source),
-        )
-
-
 def get_integration_tokens(user_id: int, source: str) -> tuple[str, str]:
-    """Fetch access_token and refresh_token from user_integrations for a source."""
+    """Fetch access_token and refresh_token from user_integrations."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT access_token, refresh_token FROM user_integrations WHERE user_id = %s AND source = %s",
@@ -63,10 +38,39 @@ def save_integration_tokens(user_id: int, source: str, access_token: str, refres
         conn.commit()
 
 
-def needs_sync(user_id: int, domain: str) -> bool:
-    """Return True if this domain has never been synced or was last synced
-    more than SYNC_THROTTLE_MINUTES ago."""
-    last = get_last_synced_at(user_id, domain)
+def get_active_source(user_id: int, data_type: str) -> str | None:
+    """Return which source the user has selected for a data type, or None if unset."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT source FROM user_data_imports WHERE user_id = %s AND data_type = %s",
+            (user_id, data_type),
+        ).fetchone()
+    return row["source"] if row else None
+
+
+def get_last_synced_at(user_id: int, source: str) -> datetime | None:
+    """Return the last successful sync time for a source, or None if never synced."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT last_synced_at FROM user_integrations WHERE user_id = %s AND source = %s",
+            (user_id, source),
+        ).fetchone()
+    return _parse_dt(row["last_synced_at"]) if row else None
+
+
+def update_last_synced_at(user_id: int, source: str) -> None:
+    """Record a successful sync for a source."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE user_integrations SET last_synced_at = NOW() WHERE user_id = %s AND source = %s",
+            (user_id, source),
+        )
+        conn.commit()
+
+
+def needs_sync(user_id: int, source: str) -> bool:
+    """Return True if this source has never synced or was last synced more than SYNC_THROTTLE_MINUTES ago."""
+    last = get_last_synced_at(user_id, source)
     if last is None:
         return True
     return datetime.now(timezone.utc) - last > timedelta(minutes=SYNC_THROTTLE_MINUTES)

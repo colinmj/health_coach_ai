@@ -36,7 +36,7 @@ def _upsert_recovery(conn: psycopg.Connection[dict[str, Any]], cycle: dict, user
     score_state = cycle.get("score_state")
 
     existing = conn.execute(
-        "SELECT id FROM recovery WHERE whoop_cycle_id = %s AND user_id = %s",
+        "SELECT id FROM recovery WHERE source = 'whoop' AND external_id = %s AND user_id = %s",
         (cycle_id, user_id),
     ).fetchone()
 
@@ -47,7 +47,7 @@ def _upsert_recovery(conn: psycopg.Connection[dict[str, Any]], cycle: dict, user
             SET date=%s, score_state=%s, recovery_score=%s, hrv_rmssd_milli=%s,
                 resting_heart_rate=%s, spo2_percentage=%s, skin_temp_celsius=%s,
                 strain=%s, daily_energy_kcal=%s
-            WHERE whoop_cycle_id=%s AND user_id=%s
+            WHERE source='whoop' AND external_id=%s AND user_id=%s
             """,
             (
                 date,
@@ -67,9 +67,9 @@ def _upsert_recovery(conn: psycopg.Connection[dict[str, Any]], cycle: dict, user
         conn.execute(
             """
             INSERT INTO recovery
-                (user_id, whoop_cycle_id, date, score_state, recovery_score, hrv_rmssd_milli,
+                (user_id, external_id, date, source, score_state, recovery_score, hrv_rmssd_milli,
                  resting_heart_rate, spo2_percentage, skin_temp_celsius, strain, daily_energy_kcal)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, 'whoop', %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
@@ -101,13 +101,12 @@ def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_i
     date = start[:10]  # YYYY-MM-DD
 
     existing = conn.execute(
-        "SELECT id FROM sleep WHERE whoop_sleep_id = %s AND user_id = %s",
+        "SELECT id FROM sleep WHERE source = 'whoop' AND external_id = %s AND user_id = %s",
         (sleep_id, user_id),
     ).fetchone()
 
     values = (
         date,
-        str(record.get("cycle_id", "")),
         bool(record.get("nap")),
         record.get("score_state"),
         start,
@@ -127,13 +126,13 @@ def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_i
         conn.execute(
             """
             UPDATE sleep
-            SET date=%s, whoop_cycle_id=%s, is_nap=%s, score_state=%s,
+            SET date=%s, is_nap=%s, score_state=%s,
                 start_time=%s, end_time=%s, total_in_bed_time_milli=%s,
                 total_awake_time_milli=%s, total_light_sleep_milli=%s,
                 total_slow_wave_sleep_milli=%s, total_rem_sleep_milli=%s,
                 disturbance_count=%s, sleep_performance_percentage=%s,
                 sleep_efficiency_percentage=%s, respiratory_rate=%s
-            WHERE whoop_sleep_id=%s AND user_id=%s
+            WHERE source='whoop' AND external_id=%s AND user_id=%s
             """,
             (*values, sleep_id, user_id),
         )
@@ -141,14 +140,14 @@ def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_i
         conn.execute(
             """
             INSERT INTO sleep
-                (user_id, date, whoop_cycle_id, is_nap, score_state, start_time, end_time,
+                (user_id, external_id, date, source, is_nap, score_state, start_time, end_time,
                  total_in_bed_time_milli, total_awake_time_milli, total_light_sleep_milli,
                  total_slow_wave_sleep_milli, total_rem_sleep_milli, disturbance_count,
                  sleep_performance_percentage, sleep_efficiency_percentage,
-                 respiratory_rate, whoop_sleep_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 respiratory_rate)
+            VALUES (%s, %s, %s, 'whoop', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (user_id, *values, sleep_id),
+            (user_id, sleep_id, *values),
         )
 
 
@@ -157,7 +156,7 @@ def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_i
 # ---------------------------------------------------------------------------
 
 def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, user_id: int) -> None:
-    """Insert or update a whoop_activities row from a workout record."""
+    """Insert or update a cardio_workouts row from a workout record."""
     workout_id = str(record["id"])
     score = record.get("score") or {}
     zones = score.get("zone_duration") or {}
@@ -171,12 +170,11 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
     energy_kcal = kilojoules / 4.184 if kilojoules is not None else None
 
     existing = conn.execute(
-        "SELECT id FROM whoop_activities WHERE whoop_workout_id = %s AND user_id = %s",
+        "SELECT id FROM cardio_workouts WHERE source = 'whoop' AND external_id = %s AND user_id = %s",
         (workout_id, user_id),
     ).fetchone()
 
     values = (
-        str(record.get("cycle_id", "")),
         date,
         sport_id,
         sport_name,
@@ -198,26 +196,26 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
     if existing:
         conn.execute(
             """
-            UPDATE whoop_activities
-            SET whoop_cycle_id=%s, date=%s, sport_id=%s, sport_name=%s, score_state=%s,
+            UPDATE cardio_workouts
+            SET date=%s, sport_id=%s, sport_name=%s, score_state=%s,
                 start_time=%s, end_time=%s, strain=%s, energy_kcal=%s,
                 avg_heart_rate=%s, max_heart_rate=%s,
                 zone_zero_milli=%s, zone_one_milli=%s, zone_two_milli=%s,
                 zone_three_milli=%s, zone_four_milli=%s, zone_five_milli=%s
-            WHERE whoop_workout_id=%s AND user_id=%s
+            WHERE source='whoop' AND external_id=%s AND user_id=%s
             """,
             (*values, workout_id, user_id),
         )
     else:
         conn.execute(
             """
-            INSERT INTO whoop_activities
-                (user_id, whoop_workout_id, whoop_cycle_id, date, sport_id, sport_name,
+            INSERT INTO cardio_workouts
+                (user_id, source, external_id, date, sport_id, sport_name,
                  score_state, start_time, end_time, strain, energy_kcal,
                  avg_heart_rate, max_heart_rate,
                  zone_zero_milli, zone_one_milli, zone_two_milli,
                  zone_three_milli, zone_four_milli, zone_five_milli)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, 'whoop', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (user_id, workout_id, *values),
         )
@@ -232,7 +230,7 @@ def sync_whoop() -> None:
     user_id = get_local_user_id()
 
     # Only fetch records newer than the last successful sync
-    last = get_last_synced_at(user_id, "recovery")
+    last = get_last_synced_at(user_id, "whoop")
     since = last.isoformat() if last else None
     if since:
         print(f"Incremental sync from {since}")
@@ -288,7 +286,7 @@ def sync_whoop() -> None:
         conn.commit()
         print(f"Activities synced: {len(workouts)} rows")
 
-    update_last_synced_at(user_id, "recovery", "whoop")
+    update_last_synced_at(user_id, "whoop")
     print("Whoop sync complete.")
 
 

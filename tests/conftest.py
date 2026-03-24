@@ -44,9 +44,9 @@ def db():
     # back at the end so the real database is left completely untouched.
     conn.execute(
         "TRUNCATE hevy_sets, hevy_exercises, hevy_workouts, "
-        "sleep, recovery, whoop_activities, body_measurements, nutrition_daily, "
+        "sleep, recovery, cardio_workouts, body_measurements, nutrition_daily, "
         "action_compliance, actions, protocols, goals, "
-        "sessions, messages, insights, user_integrations, users CASCADE"
+        "sessions, messages, insights, user_integrations, user_data_imports, users CASCADE"
     )
 
     _seed(conn)
@@ -134,19 +134,19 @@ def _seed(conn: psycopg.Connection) -> None:
     # Whoop — recovery and sleep for the nights before each workout
     # ------------------------------------------------------------------
     conn.execute(
-        "INSERT INTO recovery (user_id, whoop_cycle_id, date, source, score_state, recovery_score, hrv_rmssd_milli, resting_heart_rate) "
+        "INSERT INTO recovery (user_id, external_id, date, source, score_state, recovery_score, hrv_rmssd_milli, resting_heart_rate) "
         "VALUES (%s, 'cyc-1', '2024-01-09', 'whoop', 'SCORED', 85.0, 65.0, 52.0), "
         "       (%s, 'cyc-2', '2024-01-16', 'whoop', 'SCORED', 42.0, 38.0, 61.0)",
         (user_id, user_id),
     )
 
     conn.execute(
-        "INSERT INTO sleep (user_id, whoop_sleep_id, whoop_cycle_id, date, source, is_nap, score_state, "
+        "INSERT INTO sleep (user_id, external_id, date, source, is_nap, score_state, "
         "start_time, end_time, total_in_bed_time_milli, total_slow_wave_sleep_milli, "
         "total_rem_sleep_milli, sleep_performance_percentage, sleep_efficiency_percentage) VALUES "
-        "(%s, 'slp-1', 'cyc-1', '2024-01-09', 'whoop', FALSE, 'SCORED', "
+        "(%s, 'slp-1', '2024-01-09', 'whoop', FALSE, 'SCORED', "
         " '2024-01-09T22:00:00', '2024-01-10T06:00:00', 28800000, 5400000, 7200000, 88.0, 91.0), "
-        "(%s, 'slp-2', 'cyc-2', '2024-01-16', 'whoop', FALSE, 'SCORED', "
+        "(%s, 'slp-2', '2024-01-16', 'whoop', FALSE, 'SCORED', "
         " '2024-01-16T23:30:00', '2024-01-17T05:30:00', 21600000, 3600000, 3600000, 61.0, 72.0)",
         (user_id, user_id),
     )
@@ -156,10 +156,10 @@ def _seed(conn: psycopg.Connection) -> None:
     # ------------------------------------------------------------------
     conn.execute(
         "INSERT INTO body_measurements "
-        "(user_id, withings_group_id, measured_at, date, source, weight_kg, fat_ratio, muscle_mass_kg, fat_free_mass_kg, bone_mass_kg) "
+        "(user_id, external_id, measured_at, date, source, weight_kg, fat_ratio, muscle_mass_kg, fat_free_mass_kg, bone_mass_kg) "
         "VALUES "
-        "(%s, 1001, '2024-01-10T07:00:00+00:00', '2024-01-10', 'withings', 82.0, 0.18, 38.0, 67.0, 3.2), "
-        "(%s, 1002, '2024-01-17T07:00:00+00:00', '2024-01-17', 'withings', 81.5, 0.175, 38.5, 67.2, 3.2)",
+        "(%s, 'wth-1001', '2024-01-10T07:00:00+00:00', '2024-01-10', 'withings', 82.0, 0.18, 38.0, 67.0, 3.2), "
+        "(%s, 'wth-1002', '2024-01-17T07:00:00+00:00', '2024-01-17', 'withings', 81.5, 0.175, 38.5, 67.2, 3.2)",
         (user_id, user_id),
     )
 

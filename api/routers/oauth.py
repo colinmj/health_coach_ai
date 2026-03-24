@@ -27,7 +27,6 @@ _PROVIDERS: dict[str, dict] = {
         "auth_url": "https://api.prod.whoop.com/oauth/oauth2/auth",
         "token_url": "https://api.prod.whoop.com/oauth/oauth2/token",
         "scopes": "offline read:cycles read:recovery read:sleep read:workout",
-        "domain": "recovery",
         "client_id_env": "WHOOP_CLIENT_ID",
         "client_secret_env": "WHOOP_CLIENT_SECRET",
         "redirect_uri_env": "WHOOP_REDIRECT_URI",
@@ -36,7 +35,6 @@ _PROVIDERS: dict[str, dict] = {
         "auth_url": "https://account.withings.com/oauth2_user/authorize2",
         "token_url": "https://wbsapi.withings.net/v2/oauth2",
         "scopes": "user.metrics",
-        "domain": "body_composition",
         "client_id_env": "WITHINGS_CLIENT_ID",
         "client_secret_env": "WITHINGS_CLIENT_SECRET",
         "redirect_uri_env": "WITHINGS_REDIRECT_URI",
@@ -123,13 +121,13 @@ def oauth_callback(provider: str, code: str, state: str):
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO user_integrations (user_id, domain, source, load_type, access_token, refresh_token)
-            VALUES (%s, %s, %s, 'sync', %s, %s)
-            ON CONFLICT (user_id, domain) DO UPDATE SET
+            INSERT INTO user_integrations (user_id, source, auth_type, access_token, refresh_token)
+            VALUES (%s, %s, 'oauth', %s, %s)
+            ON CONFLICT (user_id, source) DO UPDATE SET
                 access_token  = EXCLUDED.access_token,
                 refresh_token = EXCLUDED.refresh_token
             """,
-            (user_id, cfg["domain"], provider, tokens["access_token"], tokens.get("refresh_token")),
+            (user_id, provider, tokens["access_token"], tokens.get("refresh_token")),
         )
         conn.commit()
 

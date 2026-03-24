@@ -11,6 +11,7 @@ import { GoalDetailPage } from './pages/GoalDetailPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { useAuthStore } from './stores/authStore'
 import './index.css'
 
@@ -26,14 +27,6 @@ function RequireOnboarding() {
   const onboardingComplete = useAuthStore((s) => s.onboardingComplete)
   if (!onboardingComplete) return <Navigate to="/onboarding" replace />
   return <Outlet />
-}
-
-function SettingsPlaceholder() {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      Settings coming soon.
-    </div>
-  )
 }
 
 createRoot(document.getElementById('root')!).render(
@@ -55,7 +48,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/goals/:id" element={<GoalDetailPage />} />
-                <Route path="/settings" element={<SettingsPlaceholder />} />
+                <Route path="/settings" element={<SettingsPage />} />
               </Route>
               </Route>
             </Route>

@@ -33,25 +33,30 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS weight_kg     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS fat_ratio     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS units         TEXT NOT NULL DEFAULT 'metric' CHECK (units IN ('metric', 'imperial'));
 
--- One row per (user, domain). Stores OAuth tokens and tracks which source is
--- active for each domain (strength, recovery, body_composition, nutrition).
+-- One row per (user, source). Stores OAuth tokens and tracks sync state.
 CREATE TABLE IF NOT EXISTS user_integrations (
     id               SERIAL      PRIMARY KEY,
     user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    domain           TEXT        NOT NULL,  -- 'strength' | 'recovery' | 'body_composition' | 'nutrition'
-    source           TEXT        NOT NULL,  -- 'hevy' | 'whoop' | 'withings' | 'cronometer'
-    load_type        TEXT        NOT NULL DEFAULT 'sync' CHECK (load_type IN ('sync', 'upload')),
+    source           TEXT        NOT NULL,  -- 'hevy' | 'whoop' | 'withings' | 'cronometer' | etc.
+    auth_type        TEXT        NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('oauth', 'api_key', 'upload')),
     is_active        BOOLEAN     NOT NULL DEFAULT TRUE,
     access_token     TEXT,
     refresh_token    TEXT,
     token_expires_at TIMESTAMPTZ,
     last_synced_at   TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, domain)
+    UNIQUE (user_id, source)
 );
 
--- Migrate: add load_type if upgrading from a pre-load_type schema
-ALTER TABLE user_integrations ADD COLUMN IF NOT EXISTS load_type TEXT NOT NULL DEFAULT 'sync' CHECK (load_type IN ('sync', 'upload'));
+CREATE TABLE IF NOT EXISTS user_data_imports (
+    id         SERIAL      PRIMARY KEY,
+    user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    data_type  TEXT        NOT NULL,
+    source     TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, data_type)
+);
 
 
 -- -----------------------------------------------------------------------------
@@ -94,15 +99,15 @@ CREATE TABLE IF NOT EXISTS hevy_sets (
 
 
 -- -----------------------------------------------------------------------------
--- Recovery — Whoop (or any future source)
+-- Recovery — source-agnostic
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS recovery (
     id                 SERIAL      PRIMARY KEY,
     user_id            INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    whoop_cycle_id     TEXT        NOT NULL,
+    external_id        TEXT        NOT NULL,
     date               DATE        NOT NULL,
-    source             TEXT        NOT NULL DEFAULT 'whoop',
+    source             TEXT        NOT NULL,
     score_state        TEXT,
     recovery_score     REAL,
     hrv_rmssd_milli    REAL,
@@ -112,46 +117,15 @@ CREATE TABLE IF NOT EXISTS recovery (
     strain             REAL,
     daily_energy_kcal  REAL,
     synced_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, whoop_cycle_id)
-);
-
-ALTER TABLE recovery ADD COLUMN IF NOT EXISTS daily_energy_kcal REAL;
-
--- Migrate: add strain column if upgrading from a pre-strain schema
-ALTER TABLE recovery ADD COLUMN IF NOT EXISTS strain REAL;
-
-CREATE TABLE IF NOT EXISTS whoop_activities (
-    id               SERIAL      PRIMARY KEY,
-    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    whoop_workout_id TEXT        NOT NULL,
-    whoop_cycle_id   TEXT,
-    date             DATE        NOT NULL,
-    sport_id         INTEGER,
-    sport_name       TEXT,
-    score_state      TEXT,
-    start_time       TIMESTAMPTZ,
-    end_time         TIMESTAMPTZ,
-    strain           REAL,
-    energy_kcal      REAL,
-    avg_heart_rate   INTEGER,
-    max_heart_rate   INTEGER,
-    zone_zero_milli  BIGINT,
-    zone_one_milli   BIGINT,
-    zone_two_milli   BIGINT,
-    zone_three_milli BIGINT,
-    zone_four_milli  BIGINT,
-    zone_five_milli  BIGINT,
-    synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, whoop_workout_id)
+    UNIQUE (user_id, source, external_id)
 );
 
 CREATE TABLE IF NOT EXISTS sleep (
     id                           SERIAL      PRIMARY KEY,
     user_id                      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    whoop_sleep_id               TEXT        NOT NULL,
-    whoop_cycle_id               TEXT,
+    external_id                  TEXT        NOT NULL,
     date                         DATE        NOT NULL,
-    source                       TEXT        NOT NULL DEFAULT 'whoop',
+    source                       TEXT        NOT NULL,
     is_nap                       BOOLEAN     NOT NULL DEFAULT FALSE,
     score_state                  TEXT,
     start_time                   TIMESTAMPTZ,
@@ -166,21 +140,48 @@ CREATE TABLE IF NOT EXISTS sleep (
     sleep_efficiency_percentage  REAL,
     respiratory_rate             REAL,
     synced_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, whoop_sleep_id)
+    UNIQUE (user_id, source, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS cardio_workouts (
+    id               SERIAL      PRIMARY KEY,
+    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source           TEXT        NOT NULL,
+    external_id      TEXT        NOT NULL,
+    date             DATE        NOT NULL,
+    sport_name       TEXT,
+    sport_id         INTEGER,
+    score_state      TEXT,
+    start_time       TIMESTAMPTZ,
+    end_time         TIMESTAMPTZ,
+    duration_seconds INTEGER,
+    distance_meters  REAL,
+    strain           REAL,
+    energy_kcal      REAL,
+    avg_heart_rate   INTEGER,
+    max_heart_rate   INTEGER,
+    zone_zero_milli  BIGINT,
+    zone_one_milli   BIGINT,
+    zone_two_milli   BIGINT,
+    zone_three_milli BIGINT,
+    zone_four_milli  BIGINT,
+    zone_five_milli  BIGINT,
+    synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, source, external_id)
 );
 
 
 -- -----------------------------------------------------------------------------
--- Body composition — Withings (or any future source)
+-- Body composition — source-agnostic
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS body_measurements (
     id                SERIAL      PRIMARY KEY,
     user_id           INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    withings_group_id BIGINT      NOT NULL,
+    external_id       TEXT        NOT NULL,
     measured_at       TIMESTAMPTZ NOT NULL,
     date              DATE        NOT NULL,
-    source            TEXT        NOT NULL DEFAULT 'withings',
+    source            TEXT        NOT NULL,
     weight_kg         REAL,
     fat_free_mass_kg  REAL,
     fat_ratio         REAL,
@@ -189,7 +190,7 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     hydration_kg      REAL,
     bone_mass_kg      REAL,
     synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, withings_group_id)
+    UNIQUE (user_id, source, external_id)
 );
 
 
@@ -383,13 +384,14 @@ CREATE TABLE IF NOT EXISTS action_compliance (
 -- -----------------------------------------------------------------------------
 
 -- Health data — all queries are per-user and date-ranged
-CREATE INDEX IF NOT EXISTS idx_hevy_workouts_user_start   ON hevy_workouts (user_id, start_time);
-CREATE INDEX IF NOT EXISTS idx_recovery_user_date         ON recovery      (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_sleep_user_date            ON sleep         (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_nutrition_daily_user_date  ON nutrition_daily   (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_whoop_activities_user_date ON whoop_activities  (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_whoop_activities_sport     ON whoop_activities  (user_id, sport_name);
+CREATE INDEX IF NOT EXISTS idx_hevy_workouts_user_start    ON hevy_workouts      (user_id, start_time);
+CREATE INDEX IF NOT EXISTS idx_recovery_user_date          ON recovery           (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_sleep_user_date             ON sleep              (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements  (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_nutrition_daily_user_date   ON nutrition_daily    (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_cardio_workouts_user_date   ON cardio_workouts    (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_cardio_workouts_sport       ON cardio_workouts    (user_id, sport_name);
+CREATE INDEX IF NOT EXISTS idx_data_imports_user           ON user_data_imports  (user_id, data_type);
 
 -- Agent — session lookup and message retrieval are the hot paths
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id           ON sessions  (user_id);

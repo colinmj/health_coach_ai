@@ -6,55 +6,101 @@ from db.schema import get_connection
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
-# Single source of truth for all supported integrations.
-# To add a new source: append one entry here — nothing else changes.
 CATALOGUE = [
     {
-        "source": "hevy",
-        "domain": "strength",
-        "load_type": "sync",
-        "label": "Hevy",
+        "source":      "hevy",
+        "label":       "Hevy",
         "description": "Workouts, sets, 1RM progression",
-        "env_key": "HEVY_API_KEY",
+        "auth_type":   "api_key",
+        "data_types":  ["strength_workouts"],
+        "env_key":     "HEVY_API_KEY",
     },
     {
-        "source": "whoop",
-        "domain": "recovery",
-        "load_type": "sync",
-        "label": "Whoop",
-        "description": "HRV, sleep architecture, recovery scores",
-        "env_key": "WHOOP_CLIENT_ID",
+        "source":      "strong",
+        "label":       "Strong",
+        "description": "Strength workout history — CSV export",
+        "auth_type":   "upload",
+        "data_types":  ["strength_workouts"],
+        "env_key":     None,
     },
     {
-        "source": "withings",
-        "domain": "body_composition",
-        "load_type": "sync",
-        "label": "Withings",
+        "source":      "whoop",
+        "label":       "Whoop",
+        "description": "HRV, sleep architecture, recovery scores, cardio",
+        "auth_type":   "oauth",
+        "data_types":  ["sleep", "hrv_recovery", "cardio_workouts"],
+        "env_key":     "WHOOP_CLIENT_ID",
+    },
+    {
+        "source":      "oura",
+        "label":       "Oura",
+        "description": "Sleep, HRV, readiness score",
+        "auth_type":   "api_key",
+        "data_types":  ["sleep", "hrv_recovery"],
+        "env_key":     "OURA_API_KEY",
+    },
+    {
+        "source":      "garmin",
+        "label":       "Garmin",
+        "description": "Sleep, HRV, strength, cardio, body composition",
+        "auth_type":   "oauth",
+        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "cardio_workouts", "body_composition"],
+        "env_key":     "GARMIN_CLIENT_ID",
+    },
+    {
+        "source":      "strava",
+        "label":       "Strava",
+        "description": "Runs, rides, swims and other cardio",
+        "auth_type":   "oauth",
+        "data_types":  ["cardio_workouts"],
+        "env_key":     "STRAVA_CLIENT_ID",
+    },
+    {
+        "source":      "apple_health",
+        "label":       "Apple Health",
+        "description": "All domains — export from the Health app",
+        "auth_type":   "upload",
+        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "cardio_workouts", "body_composition", "nutrition"],
+        "env_key":     None,
+    },
+    {
+        "source":      "withings",
+        "label":       "Withings",
         "description": "Weight, body fat percentage",
-        "env_key": "WITHINGS_CLIENT_ID",
+        "auth_type":   "oauth",
+        "data_types":  ["body_composition"],
+        "env_key":     "WITHINGS_CLIENT_ID",
     },
     {
-        "source": "cronometer",
-        "domain": "nutrition",
-        "load_type": "upload",
-        "label": "Cronometer",
+        "source":      "cronometer",
+        "label":       "Cronometer",
         "description": "Macros, vitamins, minerals — CSV upload",
-        "env_key": None,
+        "auth_type":   "upload",
+        "data_types":  ["nutrition"],
+        "env_key":     None,
     },
 ]
+
+DATA_TYPE_LABELS = {
+    "sleep":             "Sleep",
+    "hrv_recovery":      "HRV & Recovery",
+    "strength_workouts": "Strength Training",
+    "cardio_workouts":   "Cardio",
+    "body_composition":  "Body Composition",
+    "nutrition":         "Nutrition",
+}
 
 _SOURCE_META = {e["source"]: e for e in CATALOGUE}
 
 
 @router.get("/available")
 def available_integrations() -> list[dict]:
-    """Return the full catalogue of supported sources."""
     return CATALOGUE
 
 
 class ActivateRequest(BaseModel):
     sources: list[str]
-    credentials: dict[str, str] = {}  # source → api key (for non-OAuth integrations)
+    credentials: dict[str, str] = {}
 
 
 @router.post("/", status_code=201)
@@ -62,30 +108,80 @@ def create_integrations(
     body: ActivateRequest,
     user_id: int = Depends(get_current_user_id),
 ) -> dict:
-    """Insert user_integrations rows for the selected sources.
-
-    Unknown sources are ignored. Empty list is valid (user skipped onboarding).
-    Idempotent — safe to call multiple times.
-    """
-    if not body.sources:
+    valid = [s for s in body.sources if s in _SOURCE_META]
+    if not valid:
         return {"created": 0}
 
-    valid = [s for s in body.sources if s in _SOURCE_META]
     with get_connection() as conn:
         for source in valid:
             meta = _SOURCE_META[source]
             api_key = body.credentials.get(source)
             conn.execute(
                 """
-                INSERT INTO user_integrations (user_id, domain, source, load_type, access_token)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (user_id, domain) DO UPDATE SET
-                    source       = EXCLUDED.source,
-                    load_type    = EXCLUDED.load_type,
+                INSERT INTO user_integrations (user_id, source, auth_type, access_token)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id, source) DO UPDATE SET
+                    auth_type    = EXCLUDED.auth_type,
                     access_token = COALESCE(EXCLUDED.access_token, user_integrations.access_token)
                 """,
-                (user_id, meta["domain"], source, meta["load_type"], api_key),
+                (user_id, source, meta["auth_type"], api_key),
             )
         conn.commit()
 
     return {"created": len(valid)}
+
+
+class DataImportRequest(BaseModel):
+    assignments: dict[str, str]
+
+
+@router.post("/data-imports", status_code=201)
+def save_data_imports(
+    body: DataImportRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    if not body.assignments:
+        return {"saved": 0}
+
+    with get_connection() as conn:
+        for data_type, source in body.assignments.items():
+            conn.execute(
+                """
+                INSERT INTO user_data_imports (user_id, data_type, source)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, data_type) DO UPDATE SET
+                    source     = EXCLUDED.source,
+                    updated_at = NOW()
+                """,
+                (user_id, data_type, source),
+            )
+        conn.commit()
+
+    return {"saved": len(body.assignments)}
+
+
+@router.get("/data-imports")
+def get_data_imports(user_id: int = Depends(get_current_user_id)) -> dict:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT data_type, source FROM user_data_imports WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+    return {row["data_type"]: row["source"] for row in rows}
+
+
+@router.delete("/{source}", status_code=204)
+def delete_integration(
+    source: str,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM user_integrations WHERE user_id = %s AND source = %s",
+            (user_id, source),
+        )
+        conn.execute(
+            "DELETE FROM user_data_imports WHERE user_id = %s AND source = %s",
+            (user_id, source),
+        )
+        conn.commit()

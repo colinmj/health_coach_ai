@@ -10,8 +10,6 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import type { SyncIntegration } from '@/types'
 
-const OAUTH_PROVIDERS = new Set(['whoop', 'withings'])
-
 async function startOAuth(provider: string) {
   const token = useAuthStore.getState().token
   const res = await fetch(`/api/oauth/${provider}/start`, {
@@ -19,13 +17,6 @@ async function startOAuth(provider: string) {
   })
   const { url } = await res.json()
   window.location.href = url
-}
-
-const SOURCE_LABELS: Record<string, string> = {
-  hevy: 'Hevy',
-  whoop: 'Whoop',
-  withings: 'Withings',
-  cronometer: 'Cronometer',
 }
 
 function IntegrationRow({
@@ -50,11 +41,11 @@ function IntegrationRow({
             )}
           />
           <span className="text-xs text-sidebar-foreground">
-            {SOURCE_LABELS[integration.source] ?? integration.source}
+            {integration.label}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          {!integration.authorized && OAUTH_PROVIDERS.has(integration.source) ? (
+          {!integration.authorized && integration.auth_type === 'oauth' ? (
             <button
               onClick={() => startOAuth(integration.source)}
               className="flex items-center gap-0.5 text-xs text-primary hover:underline"
@@ -145,8 +136,8 @@ export function SyncStatus() {
     }
   }
 
-  const syncSources = integrations?.filter((i) => i.load_type === 'sync') ?? []
-  const uploadSources = integrations?.filter((i) => i.load_type === 'upload') ?? []
+  const syncSources = integrations?.filter((i) => i.auth_type !== 'upload') ?? []
+  const uploadSources = integrations?.filter((i) => i.auth_type === 'upload') ?? []
 
   return (
     <div className="border-t px-4 py-3 flex flex-col gap-3">

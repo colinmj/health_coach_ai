@@ -30,7 +30,7 @@ def fetch_workout_frequency(conn, user_id, week_start, week_end) -> float:
 
 def fetch_activity_frequency(conn, user_id, week_start, week_end) -> float:
     row = conn.execute(
-        "SELECT COUNT(*) AS val FROM whoop_activities "
+        "SELECT COUNT(*) AS val FROM cardio_workouts "
         "WHERE user_id = %s AND date >= %s AND date < %s",
         (user_id, week_start, week_end),
     ).fetchone()
@@ -39,7 +39,7 @@ def fetch_activity_frequency(conn, user_id, week_start, week_end) -> float:
 
 def fetch_running_frequency(conn, user_id, week_start, week_end) -> float:
     row = conn.execute(
-        "SELECT COUNT(*) AS val FROM whoop_activities "
+        "SELECT COUNT(*) AS val FROM cardio_workouts "
         "WHERE user_id = %s AND date >= %s AND date < %s AND sport_name ILIKE '%running%'",
         (user_id, week_start, week_end),
     ).fetchone()

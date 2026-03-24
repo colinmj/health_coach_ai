@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getAvailableIntegrations, createIntegrations } from '@/lib/api'
+import { getAvailableIntegrations, createIntegrations, saveDataImports } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,8 +10,8 @@ import { RefreshCw, Upload } from 'lucide-react'
 
 interface Integration {
   source: string
-  domain: string
-  load_type: 'sync' | 'upload'
+  data_types: string[]
+  auth_type: 'oauth' | 'api_key' | 'upload'
   label: string
   description: string
   env_key: string | null
@@ -22,6 +22,11 @@ const SETUP_NOTES: Record<string, { text: string; inputLabel?: string; inputPlac
     text: 'Get your API key from hevy.com → Settings → Developer tab.',
     inputLabel: 'Hevy API Key',
     inputPlaceholder: 'Paste your Hevy API key…',
+  },
+  oura: {
+    text: 'Get your Personal Access Token from cloud.ouraring.com → Personal Access Tokens.',
+    inputLabel: 'Oura API Key',
+    inputPlaceholder: 'Paste your Oura Personal Access Token…',
   },
   whoop: {
     text: 'Once setup is complete, connect your Whoop account from the sidebar.',
@@ -34,11 +39,13 @@ const SETUP_NOTES: Record<string, { text: string; inputLabel?: string; inputPlac
   },
 }
 
-const DOMAIN_LABELS: Record<string, string> = {
-  strength: 'Strength',
-  recovery: 'Recovery',
-  body_composition: 'Body Composition',
-  nutrition: 'Nutrition',
+const DATA_TYPE_LABELS: Record<string, string> = {
+  sleep:             'Sleep',
+  hrv_recovery:      'HRV & Recovery',
+  strength_workouts: 'Strength Training',
+  cardio_workouts:   'Cardio',
+  body_composition:  'Body Composition',
+  nutrition:         'Nutrition',
 }
 
 export function OnboardingPage() {
@@ -50,6 +57,7 @@ export function OnboardingPage() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [credentials, setCredentials] = useState<Record<string, string>>({})
+  const [dataAssignments, setDataAssignments] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -65,6 +73,24 @@ export function OnboardingPage() {
       .finally(() => setLoading(false))
   }, [onboardingComplete, navigate])
 
+  useEffect(() => {
+    if (step !== 2) return
+    // Build map of data_type -> [sources that cover it and are selected]
+    const typeToSources: Record<string, string[]> = {}
+    for (const i of integrations.filter(i => selected.has(i.source))) {
+      for (const dt of i.data_types) {
+        if (!typeToSources[dt]) typeToSources[dt] = []
+        typeToSources[dt].push(i.source)
+      }
+    }
+    // Auto-assign data types with exactly one source
+    const auto: Record<string, string> = {}
+    for (const [dt, sources] of Object.entries(typeToSources)) {
+      if (sources.length === 1) auto[dt] = sources[0]
+    }
+    setDataAssignments(prev => ({ ...auto, ...prev }))
+  }, [step, integrations, selected])
+
   function toggleSource(source: string) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -79,6 +105,7 @@ export function OnboardingPage() {
     setError(null)
     try {
       await createIntegrations(Array.from(selected), credentials)
+      await saveDataImports(dataAssignments)
       completeOnboarding()
       navigate('/')
     } catch {
@@ -132,16 +159,22 @@ export function OnboardingPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="font-medium text-sm">{i.label}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{DOMAIN_LABELS[i.domain] ?? i.domain}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {i.data_types.map(dt => DATA_TYPE_LABELS[dt] ?? dt).join(', ')}
+                        </p>
                       </div>
                       <span className={cn(
                         'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-                        i.load_type === 'upload'
+                        i.auth_type === 'upload'
                           ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                           : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
                       )}>
-                        {i.load_type === 'upload' ? <Upload className="inline h-3 w-3 mr-0.5" /> : <RefreshCw className="inline h-3 w-3 mr-0.5" />}
-                        {i.load_type === 'upload' ? 'Upload' : 'Sync'}
+                        {i.auth_type === 'upload'
+                          ? <><Upload className="inline h-3 w-3 mr-0.5" />Upload</>
+                          : i.auth_type === 'oauth'
+                            ? 'OAuth'
+                            : 'API Key'
+                        }
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{i.description}</p>
@@ -203,6 +236,44 @@ export function OnboardingPage() {
                   )
                 })}
             </div>
+
+            {(() => {
+              const typeToSources: Record<string, string[]> = {}
+              for (const i of integrations.filter(i => selected.has(i.source))) {
+                for (const dt of i.data_types) {
+                  if (!typeToSources[dt]) typeToSources[dt] = []
+                  typeToSources[dt].push(i.source)
+                }
+              }
+              const conflicts = Object.entries(typeToSources).filter(([, sources]) => sources.length > 1)
+              if (conflicts.length === 0) return null
+              return (
+                <div className="space-y-3">
+                  <div>
+                    <p className="font-medium text-sm">Data routing</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Multiple sources cover the same data type. Choose which one to use.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    {conflicts.map(([dt, sources]) => (
+                      <div key={dt} className="flex items-center justify-between gap-4">
+                        <Label className="text-xs">{DATA_TYPE_LABELS[dt] ?? dt}</Label>
+                        <select
+                          className="text-xs rounded border border-input bg-transparent px-2 py-1"
+                          value={dataAssignments[dt] ?? sources[0]}
+                          onChange={e => setDataAssignments(prev => ({ ...prev, [dt]: e.target.value }))}
+                        >
+                          {sources.map(s => (
+                            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
