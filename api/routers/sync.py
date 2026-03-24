@@ -6,7 +6,11 @@ from sync.utils import needs_sync
 from sync.hevy import sync_workouts
 from sync.whoop import sync_whoop
 from sync.withings import sync_withings
+from sync.oura import sync_oura
+from sync.strava import sync_strava
 from sync.cronometer import sync_csv_content
+from sync.strong import sync_strong_csv
+from sync.apple_health import sync_apple_health_xml
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -30,6 +34,8 @@ def _run_pending_syncs(user_id: int) -> None:
         "hevy":     sync_workouts,
         "whoop":    sync_whoop,
         "withings": sync_withings,
+        "oura":     sync_oura,
+        "strava":   sync_strava,
     }
 
     for source, handler in _SYNC_HANDLERS.items():
@@ -72,6 +78,46 @@ async def upload_csv(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"rows_imported": rows}
+
+
+@router.post("/upload-strong")
+async def upload_strong(
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Accept a Strong workout CSV export, upsert into strong_workouts / exercises / sets."""
+    content = await file.read()
+    try:
+        with get_connection() as conn:
+            count = sync_strong_csv(content, user_id, conn)
+            conn.execute(
+                "UPDATE user_integrations SET last_synced_at=NOW() WHERE user_id=%s AND source='strong'",
+                (user_id,),
+            )
+            conn.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"workouts_imported": count}
+
+
+@router.post("/upload-apple-health")
+async def upload_apple_health(
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Accept an Apple Health export.xml, upsert sleep/recovery/body/cardio data."""
+    content = await file.read()
+    try:
+        with get_connection() as conn:
+            counts = sync_apple_health_xml(content, user_id, conn)
+            conn.execute(
+                "UPDATE user_integrations SET last_synced_at=NOW() WHERE user_id=%s AND source='apple_health'",
+                (user_id,),
+            )
+            conn.commit()
+    except (ValueError, Exception) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"rows_imported": counts}
 
 
 @router.get("/status")

@@ -44,7 +44,7 @@ def db():
     # back at the end so the real database is left completely untouched.
     conn.execute(
         "TRUNCATE hevy_sets, hevy_exercises, hevy_workouts, "
-        "sleep, recovery, cardio_workouts, body_measurements, nutrition_daily, "
+        "sleep, recovery, activities, body_measurements, nutrition_daily, "
         "action_compliance, actions, protocols, goals, "
         "sessions, messages, insights, user_integrations, user_data_imports, users CASCADE"
     )

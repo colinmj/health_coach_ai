@@ -53,6 +53,7 @@ export function ChatInput() {
         onError: () => {
           setIsStreaming(false)
           setStreamingTool(null)
+          queryClient.invalidateQueries({ queryKey: ['sessions'] })
         },
       },
       ctrl.signal,

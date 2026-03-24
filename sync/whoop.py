@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from clients.whoop import WhoopClient
 from db.schema import get_connection, get_local_user_id, init_db
+from sync.activity_categories import classify_activity
 from sync.utils import get_integration_tokens, get_last_synced_at, save_integration_tokens, update_last_synced_at
 
 load_dotenv()
@@ -156,7 +157,7 @@ def _upsert_sleep(conn: psycopg.Connection[dict[str, Any]], record: dict, user_i
 # ---------------------------------------------------------------------------
 
 def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, user_id: int) -> None:
-    """Insert or update a cardio_workouts row from a workout record."""
+    """Insert or update an activities row from a workout record."""
     workout_id = str(record["id"])
     score = record.get("score") or {}
     zones = score.get("zone_duration") or {}
@@ -166,11 +167,12 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
 
     sport_id = record.get("sport_id")
     sport_name = record.get("sport_name")
+    activity_category = classify_activity(sport_name, "whoop")
     kilojoules = score.get("kilojoule")
     energy_kcal = kilojoules / 4.184 if kilojoules is not None else None
 
     existing = conn.execute(
-        "SELECT id FROM cardio_workouts WHERE source = 'whoop' AND external_id = %s AND user_id = %s",
+        "SELECT id FROM activities WHERE source = 'whoop' AND external_id = %s AND user_id = %s",
         (workout_id, user_id),
     ).fetchone()
 
@@ -178,6 +180,7 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
         date,
         sport_id,
         sport_name,
+        activity_category,
         record.get("score_state"),
         start,
         record.get("end"),
@@ -196,9 +199,9 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
     if existing:
         conn.execute(
             """
-            UPDATE cardio_workouts
-            SET date=%s, sport_id=%s, sport_name=%s, score_state=%s,
-                start_time=%s, end_time=%s, strain=%s, energy_kcal=%s,
+            UPDATE activities
+            SET date=%s, sport_id=%s, sport_name=%s, activity_category=%s,
+                score_state=%s, start_time=%s, end_time=%s, strain=%s, energy_kcal=%s,
                 avg_heart_rate=%s, max_heart_rate=%s,
                 zone_zero_milli=%s, zone_one_milli=%s, zone_two_milli=%s,
                 zone_three_milli=%s, zone_four_milli=%s, zone_five_milli=%s
@@ -209,13 +212,13 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
     else:
         conn.execute(
             """
-            INSERT INTO cardio_workouts
-                (user_id, source, external_id, date, sport_id, sport_name,
+            INSERT INTO activities
+                (user_id, source, external_id, date, sport_id, sport_name, activity_category,
                  score_state, start_time, end_time, strain, energy_kcal,
                  avg_heart_rate, max_heart_rate,
                  zone_zero_milli, zone_one_milli, zone_two_milli,
                  zone_three_milli, zone_four_milli, zone_five_milli)
-            VALUES (%s, 'whoop', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, 'whoop', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (user_id, workout_id, *values),
         )

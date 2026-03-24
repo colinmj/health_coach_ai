@@ -51,13 +51,8 @@ def get_connection() -> psycopg.Connection[dict[str, Any]]:
 def init_db() -> None:
     """Create all tables, views, and indexes (idempotent)."""
     sql = _SCHEMA_FILE.read_text()
-    # Split on semicolons — safe because our schema has no semicolons inside strings.
-    # Don't filter on startswith("--"): a statement may be preceded by a comment block
-    # and Postgres handles leading comments fine.
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
     with get_connection() as conn:
-        for stmt in statements:
-            conn.execute(stmt)
+        conn.execute(sql)
 
 
 def get_local_user_id() -> int:

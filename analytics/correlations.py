@@ -393,7 +393,7 @@ def get_nutrition_vs_activity(
             n.protein_g          AS prior_night_protein_g,
             n.fat_g              AS prior_night_fat_g,
             n.sugars_g           AS prior_night_sugars_g
-        FROM cardio_workouts a
+        FROM activities a
         JOIN nutrition_daily n ON n.date = a.date - INTERVAL '1 day'
         {where}
         ORDER BY a.date
@@ -440,7 +440,7 @@ def get_activity_vs_strength(
             a.max_heart_rate      AS prior_day_max_hr,
             a.energy_kcal         AS prior_day_calories
         FROM v_workout_performance vp
-        JOIN cardio_workouts a ON a.date = vp.workout_date - INTERVAL '1 day'
+        JOIN activities a ON a.date = vp.workout_date - INTERVAL '1 day'
         {where}
         ORDER BY vp.workout_date
     """

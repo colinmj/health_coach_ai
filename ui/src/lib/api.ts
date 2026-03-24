@@ -177,6 +177,10 @@ export function streamChat(
       else if (event.type === 'done' && event.session_id != null) handlers.onDone(event.session_id)
       else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
     },
+    onclose() {
+      // Server closed the connection normally — no reconnect needed.
+      throw new Error('Stream closed')
+    },
     onerror(err) {
       handlers.onError(err instanceof Error ? err : new Error('Stream failed'))
       throw err

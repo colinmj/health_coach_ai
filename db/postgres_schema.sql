@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS sleep (
     UNIQUE (user_id, source, external_id)
 );
 
-CREATE TABLE IF NOT EXISTS cardio_workouts (
+CREATE TABLE IF NOT EXISTS activities (
     id               SERIAL      PRIMARY KEY,
     user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     source           TEXT        NOT NULL,
@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS cardio_workouts (
     date             DATE        NOT NULL,
     sport_name       TEXT,
     sport_id         INTEGER,
+    activity_category TEXT,                -- 'cardio' | 'strength' | 'flexibility' | 'sport' | 'other'
     score_state      TEXT,
     start_time       TIMESTAMPTZ,
     end_time         TIMESTAMPTZ,
@@ -169,6 +170,25 @@ CREATE TABLE IF NOT EXISTS cardio_workouts (
     synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, source, external_id)
 );
+
+-- Add activity_category to existing installs that were already migrated
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS activity_category TEXT;
+
+
+-- -----------------------------------------------------------------------------
+-- Migrate: rename cardio_workouts → activities (idempotent)
+-- -----------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'cardio_workouts' AND schemaname = 'public')
+    AND NOT EXISTS (SELECT FROM pg_tables WHERE tablename = 'activities' AND schemaname = 'public')
+    THEN
+        ALTER TABLE cardio_workouts RENAME TO activities;
+        ALTER INDEX IF EXISTS idx_cardio_workouts_user_date RENAME TO idx_activities_user_date;
+        ALTER INDEX IF EXISTS idx_cardio_workouts_sport RENAME TO idx_activities_sport;
+    END IF;
+END $$;
 
 
 -- -----------------------------------------------------------------------------
@@ -268,6 +288,45 @@ CREATE TABLE IF NOT EXISTS nutrition_daily (
     synced_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, date)
 );
+
+
+-- -----------------------------------------------------------------------------
+-- Strength — Strong app (CSV export)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS strong_workouts (
+    id               SERIAL      PRIMARY KEY,
+    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    external_id      TEXT        NOT NULL,
+    title            TEXT,
+    started_at       TIMESTAMPTZ,
+    duration_seconds INTEGER,
+    synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS strong_exercises (
+    id             SERIAL  PRIMARY KEY,
+    workout_id     INTEGER NOT NULL REFERENCES strong_workouts(id) ON DELETE CASCADE,
+    title          TEXT    NOT NULL,
+    notes          TEXT,
+    exercise_index INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS strong_sets (
+    id               SERIAL  PRIMARY KEY,
+    exercise_id      INTEGER NOT NULL REFERENCES strong_exercises(id) ON DELETE CASCADE,
+    set_index        INTEGER,
+    weight_kg        REAL,
+    reps             INTEGER,
+    duration_seconds INTEGER,
+    distance_meters  REAL,
+    rpe              REAL,
+    estimated_1rm    REAL,
+    performance_tag  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_strong_workouts_user ON strong_workouts (user_id, started_at);
 
 
 -- -----------------------------------------------------------------------------
@@ -389,8 +448,8 @@ CREATE INDEX IF NOT EXISTS idx_recovery_user_date          ON recovery          
 CREATE INDEX IF NOT EXISTS idx_sleep_user_date             ON sleep              (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements  (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_nutrition_daily_user_date   ON nutrition_daily    (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_cardio_workouts_user_date   ON cardio_workouts    (user_id, date);
-CREATE INDEX IF NOT EXISTS idx_cardio_workouts_sport       ON cardio_workouts    (user_id, sport_name);
+CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_activities_sport     ON activities (user_id, sport_name);
 CREATE INDEX IF NOT EXISTS idx_data_imports_user           ON user_data_imports  (user_id, data_type);
 
 -- Agent — session lookup and message retrieval are the hot paths

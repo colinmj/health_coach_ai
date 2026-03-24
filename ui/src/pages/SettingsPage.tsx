@@ -23,7 +23,7 @@ const DATA_TYPE_LABELS: Record<string, string> = {
   sleep:             'Sleep',
   hrv_recovery:      'HRV & Recovery',
   strength_workouts: 'Strength Training',
-  cardio_workouts:   'Cardio',
+  activities:        'Activities',
   body_composition:  'Body Composition',
   nutrition:         'Nutrition',
 }

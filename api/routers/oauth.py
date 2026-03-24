@@ -39,6 +39,14 @@ _PROVIDERS: dict[str, dict] = {
         "client_secret_env": "WITHINGS_CLIENT_SECRET",
         "redirect_uri_env": "WITHINGS_REDIRECT_URI",
     },
+    "strava": {
+        "auth_url": "https://www.strava.com/oauth/authorize",
+        "token_url": "https://www.strava.com/oauth/token",
+        "scopes": "activity:read_all",
+        "client_id_env": "STRAVA_CLIENT_ID",
+        "client_secret_env": "STRAVA_CLIENT_SECRET",
+        "redirect_uri_env": "STRAVA_REDIRECT_URI",
+    },
 }
 
 

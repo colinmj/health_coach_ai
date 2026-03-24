@@ -257,7 +257,7 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
 
 
 async def astream_run(
-    query: str, session_id: int | None = None
+    query: str, session_id: int | None = None, user_id: int | None = None
 ) -> AsyncGenerator[dict, None]:
     """Stream one agent turn, yielding event dicts.
 
@@ -267,7 +267,8 @@ async def astream_run(
       {"type": "done",       "session_id": <int>}     — stream finished, messages persisted
     """
     today = datetime.date.today().isoformat()
-    user_id = get_local_user_id()
+    if user_id is None:
+        user_id = get_local_user_id()
 
     if session_id is None:
         session_id = sessions.create_session(user_id, query)

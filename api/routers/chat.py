@@ -18,11 +18,11 @@ class ChatRequest(BaseModel):
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
-    _user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
 ) -> StreamingResponse:
     async def generate():
         try:
-            async for event in astream_run(request.query, request.session_id):
+            async for event in astream_run(request.query, request.session_id, user_id):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

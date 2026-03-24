@@ -28,7 +28,7 @@ CATALOGUE = [
         "label":       "Whoop",
         "description": "HRV, sleep architecture, recovery scores, cardio",
         "auth_type":   "oauth",
-        "data_types":  ["sleep", "hrv_recovery", "cardio_workouts"],
+        "data_types":  ["sleep", "hrv_recovery", "activities"],
         "env_key":     "WHOOP_CLIENT_ID",
     },
     {
@@ -44,7 +44,7 @@ CATALOGUE = [
         "label":       "Garmin",
         "description": "Sleep, HRV, strength, cardio, body composition",
         "auth_type":   "oauth",
-        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "cardio_workouts", "body_composition"],
+        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "activities", "body_composition"],
         "env_key":     "GARMIN_CLIENT_ID",
     },
     {
@@ -52,7 +52,7 @@ CATALOGUE = [
         "label":       "Strava",
         "description": "Runs, rides, swims and other cardio",
         "auth_type":   "oauth",
-        "data_types":  ["cardio_workouts"],
+        "data_types":  ["activities"],
         "env_key":     "STRAVA_CLIENT_ID",
     },
     {
@@ -60,7 +60,7 @@ CATALOGUE = [
         "label":       "Apple Health",
         "description": "All domains — export from the Health app",
         "auth_type":   "upload",
-        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "cardio_workouts", "body_composition", "nutrition"],
+        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "activities", "body_composition", "nutrition"],
         "env_key":     None,
     },
     {
@@ -85,7 +85,7 @@ DATA_TYPE_LABELS = {
     "sleep":             "Sleep",
     "hrv_recovery":      "HRV & Recovery",
     "strength_workouts": "Strength Training",
-    "cardio_workouts":   "Cardio",
+    "activities":   "Cardio",
     "body_composition":  "Body Composition",
     "nutrition":         "Nutrition",
 }
