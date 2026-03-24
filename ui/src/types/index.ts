@@ -73,4 +73,5 @@ export interface SyncIntegration {
   load_type: 'sync' | 'upload'
   last_synced_at: string | null
   is_active: boolean
+  authorized: boolean
 }

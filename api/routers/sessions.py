@@ -1,15 +1,15 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from db.schema import get_connection, get_local_user_id
+from api.auth import get_current_user_id
+from db.schema import get_connection
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 @router.get("/")
-def list_sessions() -> list[dict]:
-    user_id = get_local_user_id()
+def list_sessions(user_id: int = Depends(get_current_user_id)) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -24,8 +24,7 @@ def list_sessions() -> list[dict]:
 
 
 @router.get("/{session_id}/messages")
-def get_session_messages(session_id: int) -> list[dict]:
-    user_id = get_local_user_id()
+def get_session_messages(session_id: int, user_id: int = Depends(get_current_user_id)) -> list[dict]:
     with get_connection() as conn:
         # Verify session belongs to this user
         session = conn.execute(

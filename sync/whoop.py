@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 from clients.whoop import WhoopClient
 from db.schema import get_connection, get_local_user_id, init_db
-from sync.utils import get_last_synced_at, update_last_synced_at
+from sync.utils import get_integration_tokens, get_last_synced_at, save_integration_tokens, update_last_synced_at
 
 load_dotenv()
 
@@ -237,11 +237,13 @@ def sync_whoop() -> None:
     if since:
         print(f"Incremental sync from {since}")
 
+    access_token, refresh_token = get_integration_tokens(user_id, "whoop")
     with WhoopClient(
         client_id=os.environ["WHOOP_CLIENT_ID"],
         client_secret=os.environ["WHOOP_CLIENT_SECRET"],
-        access_token=os.environ["WHOOP_ACCESS_TOKEN"],
-        refresh_token=os.environ["WHOOP_REFRESH_TOKEN"],
+        access_token=access_token,
+        refresh_token=refresh_token,
+        on_token_refresh=lambda at, rt: save_integration_tokens(user_id, "whoop", at, rt),
     ) as client:
         print("Fetching cycles (for strain)…")
         cycles = list(client.iter_cycles(start=since))

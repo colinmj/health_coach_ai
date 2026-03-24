@@ -41,6 +41,28 @@ def update_last_synced_at(user_id: int, domain: str, source: str) -> None:
         )
 
 
+def get_integration_tokens(user_id: int, source: str) -> tuple[str, str]:
+    """Fetch access_token and refresh_token from user_integrations for a source."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT access_token, refresh_token FROM user_integrations WHERE user_id = %s AND source = %s",
+            (user_id, source),
+        ).fetchone()
+    if not row or not row["access_token"]:
+        raise RuntimeError(f"No credentials found for {source}. Connect via Settings.")
+    return row["access_token"], row["refresh_token"] or ""
+
+
+def save_integration_tokens(user_id: int, source: str, access_token: str, refresh_token: str) -> None:
+    """Persist refreshed tokens back to user_integrations."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE user_integrations SET access_token = %s, refresh_token = %s WHERE user_id = %s AND source = %s",
+            (access_token, refresh_token, user_id, source),
+        )
+        conn.commit()
+
+
 def needs_sync(user_id: int, domain: str) -> bool:
     """Return True if this domain has never been synced or was last synced
     more than SYNC_THROTTLE_MINUTES ago."""

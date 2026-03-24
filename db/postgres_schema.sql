@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Migrate: add profile columns if upgrading from a pre-profile schema
+-- Migrate: add auth + profile columns if upgrading from older schema
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS sex           TEXT CHECK (sex IN ('male', 'female', 'other'));
 ALTER TABLE users ADD COLUMN IF NOT EXISTS height_cm     REAL;

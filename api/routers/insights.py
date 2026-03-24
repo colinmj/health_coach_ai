@@ -1,12 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from db.schema import get_local_user_id
+from api.auth import get_current_user_id
 from analytics.goals import get_active_insights
 
 router = APIRouter(prefix="/insights", tags=["insights"])
 
 
 @router.get("/")
-def list_insights() -> list[dict]:
-    user_id = get_local_user_id()
+def list_insights(user_id: int = Depends(get_current_user_id)) -> list[dict]:
     return get_active_insights(user_id)

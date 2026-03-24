@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from clients.withings import WithingsClient
 from db.schema import get_connection, get_local_user_id, init_db
-from sync.utils import get_last_synced_at, update_last_synced_at
+from sync.utils import get_integration_tokens, get_last_synced_at, save_integration_tokens, update_last_synced_at
 
 load_dotenv()
 
@@ -100,11 +100,13 @@ def sync_withings() -> None:
         print(f"Incremental sync from {last.isoformat()}")
 
     print("Fetching body measurements from Withings…")
+    access_token, refresh_token = get_integration_tokens(user_id, "withings")
     with WithingsClient(
         client_id=os.environ["WITHINGS_CLIENT_ID"],
         client_secret=os.environ["WITHINGS_CLIENT_SECRET"],
-        access_token=os.environ["WITHINGS_ACCESS_TOKEN"],
-        refresh_token=os.environ["WITHINGS_REFRESH_TOKEN"],
+        access_token=access_token,
+        refresh_token=refresh_token,
+        on_token_refresh=lambda at, rt: save_integration_tokens(user_id, "withings", at, rt),
     ) as client:
         # Collect all groups then sort oldest-first for consistency
         grps = list(client.iter_body_measurements(startdate=startdate))

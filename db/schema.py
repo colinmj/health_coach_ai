@@ -1,5 +1,6 @@
 import datetime
 import os
+from contextvars import ContextVar
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,14 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
+
+# Set by the FastAPI JWT dependency for each request so all tools resolve
+# the correct user without needing to thread user_id through every call.
+_current_user_id: ContextVar[int | None] = ContextVar("current_user_id", default=None)
+
+
+def set_current_user_id(user_id: int) -> None:
+    _current_user_id.set(user_id)
 
 load_dotenv()
 
@@ -52,11 +61,16 @@ def init_db() -> None:
 
 
 def get_local_user_id() -> int:
-    """Get or create the single local user, returning their id.
+    """Return the current user_id for this request/script.
 
-    Called by sync scripts to obtain a user_id for all inserts.
-    In multi-user mode this will be replaced by proper auth context.
+    API requests: returns the id set by the JWT dependency via set_current_user_id().
+    CLI sync scripts: falls back to the local single user (creates if needed).
     """
+    uid = _current_user_id.get()
+    if uid is not None:
+        return uid
+
+    # CLI fallback — create/fetch the local user (no integrations seeded here).
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -67,22 +81,4 @@ def get_local_user_id() -> int:
             """,
         ).fetchone()
         assert row is not None
-        user_id = row["id"]
-
-        # Seed integration rows so the UI can show status before any sync runs.
-        # ON CONFLICT does nothing — preserves last_synced_at once populated.
-        conn.execute(
-            """
-            INSERT INTO user_integrations (user_id, domain, source, load_type) VALUES
-                (%s, 'strength',         'hevy',        'sync'),
-                (%s, 'recovery',         'whoop',       'sync'),
-                (%s, 'body_composition', 'withings',    'sync'),
-                (%s, 'nutrition',        'cronometer',  'upload')
-            ON CONFLICT (user_id, domain) DO UPDATE SET
-                source    = EXCLUDED.source,
-                load_type = EXCLUDED.load_type
-            """,
-            (user_id, user_id, user_id, user_id),
-        )
-
-        return user_id
+        return row["id"]

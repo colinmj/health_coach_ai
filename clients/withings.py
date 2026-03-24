@@ -7,7 +7,7 @@ Pagination: offset-based (more == 1 signals additional pages).
 
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import httpx
 from dotenv import set_key
@@ -27,10 +27,12 @@ class WithingsClient:
         client_secret: str,
         access_token: str,
         refresh_token: str,
+        on_token_refresh: Callable[[str, str], None] | None = None,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_token = refresh_token
+        self._on_token_refresh = on_token_refresh
         self._client = httpx.Client(base_url=_BASE_URL, timeout=30.0)
         self._client.headers["Authorization"] = f"Bearer {access_token}"
 
@@ -57,8 +59,11 @@ class WithingsClient:
         tokens = body["body"]
         self._client.headers["Authorization"] = f"Bearer {tokens['access_token']}"
         self._refresh_token = tokens["refresh_token"]
-        set_key(_ENV_PATH, "WITHINGS_ACCESS_TOKEN", tokens["access_token"])
-        set_key(_ENV_PATH, "WITHINGS_REFRESH_TOKEN", tokens["refresh_token"])
+        if self._on_token_refresh:
+            self._on_token_refresh(tokens["access_token"], tokens["refresh_token"])
+        else:
+            set_key(_ENV_PATH, "WITHINGS_ACCESS_TOKEN", tokens["access_token"])
+            set_key(_ENV_PATH, "WITHINGS_REFRESH_TOKEN", tokens["refresh_token"])
 
     def _post(self, path: str, params: dict) -> dict:
         """POST with one automatic token refresh on 401 or invalid_token status."""

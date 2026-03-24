@@ -6,10 +6,10 @@ Pagination: token-based (next_token field).
 """
 
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import httpx
-from dotenv import get_key, set_key
+from dotenv import set_key
 
 _BASE_URL = "https://api.prod.whoop.com"
 _TOKEN_URL = f"{_BASE_URL}/oauth/oauth2/token"
@@ -24,10 +24,12 @@ class WhoopClient:
         client_secret: str,
         access_token: str,
         refresh_token: str,
+        on_token_refresh: Callable[[str, str], None] | None = None,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_token = refresh_token
+        self._on_token_refresh = on_token_refresh
         self._client = httpx.Client(base_url=_BASE_URL, timeout=30.0)
         self._client.headers["Authorization"] = f"Bearer {access_token}"
 
@@ -50,8 +52,11 @@ class WhoopClient:
         tokens = resp.json()
         self._client.headers["Authorization"] = f"Bearer {tokens['access_token']}"
         self._refresh_token = tokens["refresh_token"]
-        set_key(_ENV_PATH, "WHOOP_ACCESS_TOKEN", tokens["access_token"])
-        set_key(_ENV_PATH, "WHOOP_REFRESH_TOKEN", tokens["refresh_token"])
+        if self._on_token_refresh:
+            self._on_token_refresh(tokens["access_token"], tokens["refresh_token"])
+        else:
+            set_key(_ENV_PATH, "WHOOP_ACCESS_TOKEN", tokens["access_token"])
+            set_key(_ENV_PATH, "WHOOP_REFRESH_TOKEN", tokens["refresh_token"])
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         """GET with one automatic token refresh on 401."""

@@ -4,10 +4,22 @@ import { getSyncStatus, triggerSync, uploadCsvFile } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Loader2, RefreshCw, Upload } from 'lucide-react'
+import { ExternalLink, Loader2, RefreshCw, Upload } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
 import type { SyncIntegration } from '@/types'
+
+const OAUTH_PROVIDERS = new Set(['whoop', 'withings'])
+
+async function startOAuth(provider: string) {
+  const token = useAuthStore.getState().token
+  const res = await fetch(`/api/oauth/${provider}/start`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const { url } = await res.json()
+  window.location.href = url
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   hevy: 'Hevy',
@@ -42,11 +54,20 @@ function IntegrationRow({
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">
-            {integration.last_synced_at
-              ? formatDistanceToNow(new Date(integration.last_synced_at), { addSuffix: true })
-              : 'never'}
-          </span>
+          {!integration.authorized && OAUTH_PROVIDERS.has(integration.source) ? (
+            <button
+              onClick={() => startOAuth(integration.source)}
+              className="flex items-center gap-0.5 text-xs text-primary hover:underline"
+            >
+              Connect <ExternalLink className="h-2.5 w-2.5" />
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {integration.last_synced_at
+                ? formatDistanceToNow(new Date(integration.last_synced_at), { addSuffix: true })
+                : 'never'}
+            </span>
+          )}
           {onUpload && (
             <Tooltip>
               <TooltipTrigger asChild>

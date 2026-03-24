@@ -7,3 +7,5 @@ langgraph
 pytest
 fastapi
 uvicorn[standard]
+python-jose[cryptography]
+python-multipart
