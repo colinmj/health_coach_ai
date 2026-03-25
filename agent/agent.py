@@ -67,16 +67,27 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
     return lines
 
 
+def _fetch_user_units(user_id: int) -> str:
+    """Return the user's units preference ('metric' or 'imperial')."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT units FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
+    return (row or {}).get("units", "metric")
+
+
 def build_context_block(user_id: int, current_session_id: int | None = None) -> str:
     """Assemble the structured context block injected into the agent system prompt."""
     today = datetime.date.today()
     soon = today + datetime.timedelta(days=7)
 
+    units = _fetch_user_units(user_id)
     goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
     pinned_insights = [i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")]
     compliance_map = _fetch_compliance_map(user_id)
 
-    lines = ["## Current goals, protocols & compliance\n"]
+    lines = [f"## User preferences\n- Units: {units}\n"]
+    lines.append("## Current goals, protocols & compliance\n")
     lines.extend(_format_goals_lines(goals, compliance_map, soon))
 
     if pinned_insights:
@@ -160,8 +171,13 @@ name exists in the data and to get the correct capitalisation.
 pre-aggregated rows. Narrate the pattern; do not compute statistics yourself.
 6. Convert milliseconds to hours/minutes when presenting sleep durations.
 7. Report numbers to one decimal place unless asked for more.
-8. If data is missing for a date, say so clearly.
-9. Lead with the direct answer, then supporting data. Keep responses concise.
+8. Always present measurements in the user's preferred units (see context block). \
+If units=imperial: convert weight kg→lbs (×2.205), distance km→miles (×0.621), \
+height cm→ft/in. If units=metric, present as-is. All data is stored in metric — \
+convert at presentation time only.
+9. If data is missing for a date, say so clearly.
+10. Lead with the direct answer, then supporting data. Keep responses concise.
+11. Never output raw JSON in your responses — always present data in plain language.
 
 ## Goal setting
 

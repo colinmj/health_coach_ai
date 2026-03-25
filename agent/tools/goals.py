@@ -169,12 +169,8 @@ def create_goal(
 
             return json.dumps({
                 "goal_id": goal_id,
-                "goal_text": goal_text,
-                "domains": parsed_domains,
-                "target_date": target_date_val,
                 "protocol_id": protocol_id,
                 "protocol_title": protocol_title,
-                "protocol_text": protocol_data["protocol_text"],
                 "review_date": protocol_data["review_date"],
                 "actions": inserted_actions,
             })
