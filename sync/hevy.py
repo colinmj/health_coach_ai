@@ -15,7 +15,7 @@ import psycopg
 from dotenv import load_dotenv
 
 from clients.hevy import HevyClient
-from db.schema import get_connection, get_local_user_id, init_db
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
 from sync.utils import get_integration_tokens, get_last_synced_at, update_last_synced_at
 
 load_dotenv()
@@ -192,7 +192,7 @@ def _insert_exercises_and_sets(
 
 def sync_workouts() -> None:
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     api_key, _ = get_integration_tokens(user_id, "hevy")
 
     # Hevy has no API-level date filter, so we stop paginating early once we
@@ -228,4 +228,5 @@ def sync_workouts() -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     sync_workouts()

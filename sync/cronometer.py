@@ -8,10 +8,11 @@ Each run is idempotent — existing rows are updated, new ones inserted.
 
 import csv
 import io
+import os
 import sys
 from pathlib import Path
 
-from db.schema import get_connection, get_local_user_id, init_db
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
 
 # Maps CSV header → DB column name
 _COLUMN_MAP = {
@@ -166,7 +167,7 @@ def sync_csv_content(content: bytes, user_id: int, conn) -> int:
 
 def sync_csv(csv_path: str | Path) -> None:
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     csv_path = Path(csv_path)
 
     if not csv_path.exists():
@@ -183,6 +184,7 @@ def sync_csv(csv_path: str | Path) -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     if len(sys.argv) != 2:
         print("Usage: python -m sync.cronometer <path/to/dailysummary.csv>", file=sys.stderr)
         sys.exit(1)

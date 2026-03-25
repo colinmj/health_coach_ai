@@ -12,7 +12,7 @@ from agent.tools import build_tools
 from agent import sessions
 import analytics.goals as goals_analytics
 import analytics.trends as trends_analytics
-from db.schema import get_local_user_id, get_connection
+from db.schema import get_request_user_id, set_current_user_id, get_connection
 
 load_dotenv()
 
@@ -222,7 +222,7 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     Returns (response_text, session_id).
     """
     today = datetime.date.today().isoformat()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     # Create or resume session
     if session_id is None:
@@ -267,8 +267,11 @@ async def astream_run(
       {"type": "done",       "session_id": <int>}     — stream finished, messages persisted
     """
     today = datetime.date.today().isoformat()
+    # Resolve user_id and propagate it into the ContextVar so all tool calls
+    # within this run can read it via get_request_user_id().
     if user_id is None:
-        user_id = get_local_user_id()
+        user_id = get_request_user_id()  # reads ContextVar set by API or CLI __main__
+    set_current_user_id(user_id)
 
     if session_id is None:
         session_id = sessions.create_session(user_id, query)
@@ -323,6 +326,9 @@ async def astream_run(
 if __name__ == "__main__":
     import asyncio
     import sys
+    from db.schema import get_cli_user_id
+
+    set_current_user_id(get_cli_user_id())
 
     async def _repl() -> None:
         current_session: int | None = None

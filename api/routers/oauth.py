@@ -23,6 +23,14 @@ from db.schema import get_connection
 router = APIRouter(prefix="/oauth", tags=["oauth"])
 
 _PROVIDERS: dict[str, dict] = {
+    "oura": {
+        "auth_url": "https://cloud.ouraring.com/oauth/authorize",
+        "token_url": "https://api.ouraring.com/oauth/token",
+        "scopes": "daily heartrate spo2 personal workout",
+        "client_id_env": "OURA_CLIENT_ID",
+        "client_secret_env": "OURA_CLIENT_SECRET",
+        "redirect_uri_env": "OURA_REDIRECT_URI",
+    },
     "whoop": {
         "auth_url": "https://api.prod.whoop.com/oauth/oauth2/auth",
         "token_url": "https://api.prod.whoop.com/oauth/oauth2/token",

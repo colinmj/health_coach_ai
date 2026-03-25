@@ -8,7 +8,7 @@ from langchain_core.tools import tool
 
 import analytics.goals as goals_analytics
 import analytics.compliance as compliance_analytics
-from db.schema import get_connection, get_local_user_id
+from db.schema import get_connection, get_request_user_id
 from agent.tools._config import _DOMAIN_ALLOWLIST, _CONFIDENCE_RANK, DEFAULT_SOURCES
 
 
@@ -32,7 +32,7 @@ def create_goal(
     Enforces a cap of 3 active goals.
     Returns a JSON summary of the created goal, protocol, and actions.
     """
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
     today = datetime.date.today().isoformat()
@@ -184,7 +184,7 @@ def create_goal(
 def get_goals() -> str:
     """Return all goals with their protocols and actions.
     Returns a JSON list of goals, each with nested protocols and actions."""
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     return json.dumps(goals_analytics.get_goals_with_protocols_and_actions(user_id))
 
 
@@ -205,7 +205,7 @@ def save_insight(
     title: a short 5-8 word title summarising the insight (e.g. 'Sleep boosts next-day strength').
     A stronger insight for the same tool supersedes a weaker one.
     Enforces caps: 7 active total, 3 pinned."""
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     if effect not in ("positive", "negative", "neutral"):
         return f"Invalid effect '{effect}'. Must be positive, negative, or neutral."
@@ -272,7 +272,7 @@ def save_insight(
 def get_insights() -> str:
     """Return all active insights, pinned first.
     Returns a JSON list of insight records."""
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     return json.dumps(goals_analytics.get_active_insights(user_id))
 
 
@@ -281,7 +281,7 @@ def check_compliance(protocol_id: str = "") -> str:
     """Check weekly compliance for active protocols and their actions.
     Optionally pass a protocol_id to check only that protocol.
     Returns a JSON summary of actual vs target values for each action this week."""
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     pid = int(protocol_id) if protocol_id.strip() else None
     return json.dumps(compliance_analytics.run_compliance_check(user_id, protocol_id=pid))
 
@@ -293,7 +293,7 @@ def update_goal_status(goal_id: str, status: str) -> str:
     status: 'achieved' or 'abandoned'."""
     if status not in ("achieved", "abandoned"):
         return f"Invalid status '{status}'. Must be 'achieved' or 'abandoned'."
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     with get_connection() as conn:
         result = conn.execute(
             "UPDATE goals SET status = %s, updated_at = NOW() WHERE id = %s AND user_id = %s RETURNING id",
@@ -311,7 +311,7 @@ def assess_protocol(protocol_id: str, outcome: str) -> str:
     outcome: 'effective', 'ineffective', or 'inconclusive'."""
     if outcome not in ("effective", "ineffective", "inconclusive"):
         return f"Invalid outcome '{outcome}'. Must be 'effective', 'ineffective', or 'inconclusive'."
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     with get_connection() as conn:
         result = conn.execute(
             "UPDATE protocols SET status = 'completed', outcome = %s, updated_at = NOW() "

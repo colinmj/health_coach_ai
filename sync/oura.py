@@ -3,18 +3,19 @@
 Run:
     python -m sync.oura
 
-Each run is idempotent. Requires an Oura Personal Access Token stored in
-user_integrations.access_token — connect via Settings to provide it.
+Each run is idempotent. Requires Oura OAuth tokens stored in user_integrations
+— connect via Settings → Oura → Connect to authorize.
 """
 
+import os
 from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
 
 from clients.oura import OuraClient
-from db.schema import get_connection, get_local_user_id, init_db
-from sync.utils import get_integration_tokens, get_last_synced_at, update_last_synced_at
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
+from sync.utils import get_integration_tokens, save_integration_tokens, get_last_synced_at, update_last_synced_at
 
 load_dotenv()
 
@@ -139,15 +140,21 @@ def _upsert_readiness(conn: psycopg.Connection[dict[str, Any]], record: dict, us
 
 def sync_oura() -> None:
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     last = get_last_synced_at(user_id, "oura")
     start_date = last.strftime("%Y-%m-%d") if last else None
     if start_date:
         print(f"Incremental sync from {start_date}")
 
-    api_key, _ = get_integration_tokens(user_id, "oura")
-    with OuraClient(api_key=api_key) as client:
+    access_token, refresh_token = get_integration_tokens(user_id, "oura")
+    with OuraClient(
+        client_id=os.environ["OURA_CLIENT_ID"],
+        client_secret=os.environ["OURA_CLIENT_SECRET"],
+        access_token=access_token,
+        refresh_token=refresh_token,
+        on_token_refresh=lambda at, rt: save_integration_tokens(user_id, "oura", at, rt),
+    ) as client:
         print("Fetching sleep…")
         sleeps = list(client.iter_sleep(start_date=start_date))
         print(f"  {len(sleeps)} sleep records found")
@@ -172,4 +179,5 @@ def sync_oura() -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     sync_oura()

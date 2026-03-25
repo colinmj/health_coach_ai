@@ -3,7 +3,7 @@ import json
 from langchain_core.tools import tool
 
 import analytics.correlations as corr
-from db.schema import get_local_user_id
+from db.schema import get_request_user_id
 
 
 @tool
@@ -187,7 +187,7 @@ def get_energy_balance_vs_weight(since: str = "", until: str = "") -> str:
     rolling_7d_avg_consumed, rolling_7d_avg_burned, rolling_7d_avg_balance,
     rolling_7d_expected_weight_change_kg, weight_kg, weight_7d_ago_kg,
     actual_7d_weight_change_kg."""
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     return json.dumps(corr.get_energy_balance_vs_weight(
         user_id=user_id,
         since=since.strip() or None,

@@ -30,7 +30,7 @@ export async function registerUser(email: string, password: string): Promise<{ t
   return res.json()
 }
 
-export async function loginUser(email: string, password: string): Promise<{ token: string; user_id: number }> {
+export async function loginUser(email: string, password: string): Promise<{ token: string; user_id: number; has_integrations: boolean }> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

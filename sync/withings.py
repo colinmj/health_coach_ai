@@ -16,7 +16,7 @@ import psycopg
 from dotenv import load_dotenv
 
 from clients.withings import WithingsClient
-from db.schema import get_connection, get_local_user_id, init_db
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
 from sync.utils import get_integration_tokens, get_last_synced_at, save_integration_tokens, update_last_synced_at
 
 load_dotenv()
@@ -91,7 +91,7 @@ def _upsert_measurement(grp: dict, conn: psycopg.Connection[dict[str, Any]], use
 
 def sync_withings() -> None:
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     # Only fetch measurements newer than the last successful sync
     last = get_last_synced_at(user_id, "withings")
@@ -125,4 +125,5 @@ def sync_withings() -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     sync_withings()

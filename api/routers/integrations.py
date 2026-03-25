@@ -35,9 +35,9 @@ CATALOGUE = [
         "source":      "oura",
         "label":       "Oura",
         "description": "Sleep, HRV, readiness score",
-        "auth_type":   "api_key",
+        "auth_type":   "oauth",
         "data_types":  ["sleep", "hrv_recovery"],
-        "env_key":     "OURA_API_KEY",
+        "env_key":     "OURA_CLIENT_ID",
     },
     {
         "source":      "garmin",

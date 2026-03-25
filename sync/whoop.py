@@ -14,7 +14,7 @@ import psycopg
 from dotenv import load_dotenv
 
 from clients.whoop import WhoopClient
-from db.schema import get_connection, get_local_user_id, init_db
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
 from sync.activity_categories import classify_activity
 from sync.utils import get_integration_tokens, get_last_synced_at, save_integration_tokens, update_last_synced_at
 
@@ -230,7 +230,7 @@ def _upsert_activity(conn: psycopg.Connection[dict[str, Any]], record: dict, use
 
 def sync_whoop() -> None:
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
 
     # Only fetch records newer than the last successful sync
     last = get_last_synced_at(user_id, "whoop")
@@ -294,4 +294,5 @@ def sync_whoop() -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     sync_whoop()

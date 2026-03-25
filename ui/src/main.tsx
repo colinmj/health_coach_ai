@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppLayout } from './layouts/AppLayout'
 import { ChatPage } from './pages/ChatPage'
-import { DashboardPage } from './pages/DashboardPage'
 import { GoalsPage } from './pages/GoalsPage'
 import { GoalDetailPage } from './pages/GoalDetailPage'
 import { LoginPage } from './pages/LoginPage'
@@ -45,7 +44,6 @@ createRoot(document.getElementById('root')!).render(
               <Route element={<RequireOnboarding />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<ChatPage />} />
-                <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/goals/:id" element={<GoalDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

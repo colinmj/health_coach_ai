@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 export function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const completeOnboarding = useAuthStore((s) => s.completeOnboarding)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -19,8 +20,9 @@ export function LoginPage() {
     setError(null)
     setLoading(true)
     try {
-      const { token, user_id } = await loginUser(email, password)
+      const { token, user_id, has_integrations } = await loginUser(email, password)
       setAuth(token, user_id)
+      if (has_integrations) completeOnboarding()
       navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')

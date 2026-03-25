@@ -24,9 +24,8 @@ const SETUP_NOTES: Record<string, { text: string; inputLabel?: string; inputPlac
     inputPlaceholder: 'Paste your Hevy API key…',
   },
   oura: {
-    text: 'Get your Personal Access Token from cloud.ouraring.com → Personal Access Tokens.',
-    inputLabel: 'Oura API Key',
-    inputPlaceholder: 'Paste your Oura Personal Access Token…',
+    text: 'Once setup is complete, connect your Oura account from the sidebar.',
+    oauthProvider: 'oura',
   },
   whoop: {
     text: 'Once setup is complete, connect your Whoop account from the sidebar.',

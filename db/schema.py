@@ -55,25 +55,27 @@ def init_db() -> None:
         conn.execute(sql)
 
 
-def get_local_user_id() -> int:
-    """Return the current user_id for this request/script.
+def get_request_user_id() -> int:
+    """Return the user_id for the current request.
 
-    API requests: returns the id set by the JWT dependency via set_current_user_id().
-    CLI sync scripts: falls back to the local single user (creates if needed).
+    Reads from the ContextVar set by set_current_user_id() (via API auth or astream_run).
+    Raises RuntimeError if not set.
     """
     uid = _current_user_id.get()
     if uid is not None:
         return uid
+    raise RuntimeError(
+        "No user_id in context — set_current_user_id() must be called before invoking tools."
+    )
 
-    # CLI fallback — create/fetch the local user (no integrations seeded here).
+
+def get_cli_user_id() -> int:
+    """For CLI sync scripts: return the primary registered user's id.
+
+    Looks up the first user in the DB (by id). Raises if no user exists yet.
+    """
     with get_connection() as conn:
-        row = conn.execute(
-            """
-            INSERT INTO users (email, name)
-            VALUES ('local@localhost', 'Local User')
-            ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id
-            """,
-        ).fetchone()
-        assert row is not None
-        return row["id"]
+        row = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+    if row is None:
+        raise RuntimeError("No users found. Register via the web app first.")
+    return row["id"]

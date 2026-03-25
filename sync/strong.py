@@ -14,6 +14,7 @@ Strong CSV columns (semicolon-separated):
 import csv
 import io
 import re
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -22,7 +23,7 @@ from typing import Any
 import psycopg
 from dotenv import load_dotenv
 
-from db.schema import get_connection, get_local_user_id, init_db
+from db.schema import get_connection, get_request_user_id, set_current_user_id, get_cli_user_id, init_db
 
 load_dotenv()
 
@@ -300,7 +301,7 @@ def main() -> None:
         sys.exit(1)
 
     init_db()
-    user_id = get_local_user_id()
+    user_id = get_request_user_id()
     content = Path(sys.argv[1]).read_bytes()
 
     with get_connection() as conn:
@@ -311,4 +312,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    set_current_user_id(get_cli_user_id())
     main()

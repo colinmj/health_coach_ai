@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils'
 
 const NAV_LINKS = [
   { to: '/', label: 'Chat', end: true },
-  { to: '/dashboard', label: 'Dashboard', end: false },
   { to: '/goals', label: 'Goals & Insights', end: false },
 ]
 

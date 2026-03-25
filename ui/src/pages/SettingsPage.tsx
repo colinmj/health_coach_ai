@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { ExternalLink, Loader2, Trash2, Check, Upload } from 'lucide-react'
+import { ExternalLink, Loader2, Trash2, Check } from 'lucide-react'
 import type { SyncIntegration } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -33,7 +33,12 @@ async function startOAuth(provider: string) {
   const res = await fetch(`/api/oauth/${provider}/start`, {
     headers: { Authorization: `Bearer ${token}` },
   })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `OAuth start failed for ${provider}`)
+  }
   const { url } = await res.json()
+  if (!url) throw new Error(`No redirect URL returned for ${provider}`)
   window.location.href = url
 }
 
@@ -259,7 +264,7 @@ function IntegrationCard({
             <p className="font-medium text-sm">{available.label}</p>
             {isConnected && (
               <span className="shrink-0 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 text-xs font-medium">
-                {connected!.authorized ? 'Connected' : 'Pending auth'}
+                {available.auth_type === 'upload' ? 'Enabled' : connected!.authorized ? 'Connected' : 'Pending auth'}
               </span>
             )}
           </div>
@@ -270,10 +275,10 @@ function IntegrationCard({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {/* Upload — always shows as available; connect = add row */}
+          {/* Upload — enable/disable */}
           {available.auth_type === 'upload' && !isConnected && (
             <Button size="sm" variant="outline" disabled={working} onClick={() => onConnect()}>
-              {working ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Upload className="h-3 w-3 mr-1.5" />Add</>}
+              {working ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Enable'}
             </Button>
           )}
 
@@ -296,8 +301,13 @@ function IntegrationCard({
             </Button>
           )}
 
-          {/* Disconnect */}
-          {isConnected && (
+          {/* Disable (upload) / Disconnect (oauth, api_key) */}
+          {isConnected && available.auth_type === 'upload' && (
+            <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" disabled={working} onClick={handleDisconnect}>
+              {working ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Disable'}
+            </Button>
+          )}
+          {isConnected && available.auth_type !== 'upload' && (
             <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={working} onClick={handleDisconnect}>
               {working ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
             </Button>
@@ -341,7 +351,7 @@ function DataRouting({
   onChange: (dt: string, source: string) => void
 }) {
   const typeToSources: Record<string, string[]> = {}
-  for (const i of connected) {
+  for (const i of connected.filter((i) => i.last_synced_at !== null)) {
     for (const dt of i.data_types) {
       if (!typeToSources[dt]) typeToSources[dt] = []
       typeToSources[dt].push(i.source)

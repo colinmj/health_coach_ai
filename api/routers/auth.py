@@ -53,4 +53,10 @@ def login(body: AuthRequest) -> dict:
             detail="Invalid email or password",
         )
 
-    return {"token": create_token(row["id"]), "user_id": row["id"]}
+    with get_connection() as conn:
+        has_integrations = conn.execute(
+            "SELECT 1 FROM user_integrations WHERE user_id = %s AND is_active = TRUE LIMIT 1",
+            (row["id"],),
+        ).fetchone() is not None
+
+    return {"token": create_token(row["id"]), "user_id": row["id"], "has_integrations": has_integrations}

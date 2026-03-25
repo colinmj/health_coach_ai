@@ -188,7 +188,7 @@ export function SyncStatus() {
           <div className="mb-2 flex items-center gap-1.5">
             <Upload className="h-3 w-3 text-muted-foreground" />
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Uploaded
+              Data Upload
             </span>
           </div>
           {isLoading && <Skeleton className="h-4 w-full rounded" />}

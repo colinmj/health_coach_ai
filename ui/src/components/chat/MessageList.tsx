@@ -1,7 +1,128 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import Markdown from 'markdown-to-jsx'
+import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { cn } from '@/lib/utils'
+
+/** Strips all common markdown syntax, leaving plain text suitable for clipboard. */
+function stripMarkdown(text: string): string {
+  return text
+    // Fenced code blocks — keep the content, drop the fences
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, '$1')
+    // Inline code
+    .replace(/`([^`]*)`/g, '$1')
+    // ATX headings (# ## ### etc.)
+    .replace(/^#{1,6}\s+/gm, '')
+    // Bold + italic (*** or ___)
+    .replace(/\*{3}([^*]+)\*{3}/g, '$1')
+    .replace(/_{3}([^_]+)_{3}/g, '$1')
+    // Bold (** or __)
+    .replace(/\*{2}([^*]+)\*{2}/g, '$1')
+    .replace(/_{2}([^_]+)_{2}/g, '$1')
+    // Italic (* or _)
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Strikethrough (~~)
+    .replace(/~~([^~]+)~~/g, '$1')
+    // Links — keep the label
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Images — drop entirely
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+    // Blockquotes
+    .replace(/^>\s+/gm, '')
+    // Unordered list markers
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    // Ordered list markers
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // Horizontal rules
+    .replace(/^[-*_]{3,}\s*$/gm, '')
+    // Collapse 3+ blank lines to a single blank line
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+type FeedbackState = 'thumbs-up' | 'thumbs-down' | null
+
+interface MessageActionsProps {
+  text: string
+}
+
+function MessageActions({ text }: MessageActionsProps) {
+  const [copied, setCopied] = useState(false)
+  const [feedback, setFeedback] = useState<FeedbackState>(null)
+
+  const handleCopy = useCallback(() => {
+    const plain = stripMarkdown(text)
+    navigator.clipboard.writeText(plain).then(() => {
+      setCopied(true)
+      const timer = window.setTimeout(() => setCopied(false), 1500)
+      return () => window.clearTimeout(timer)
+    })
+  }, [text])
+
+  const handleFeedback = useCallback((value: FeedbackState) => {
+    setFeedback((prev) => (prev === value ? null : value))
+  }, [])
+
+  return (
+    <div className="mt-1 flex items-center gap-0.5 pl-1">
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={copied ? 'Copied' : 'Copy message'}
+        className={cn(
+          'rounded p-1 transition-all duration-150',
+          'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-green-500" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleFeedback('thumbs-up')}
+        aria-label="Helpful"
+        aria-pressed={feedback === 'thumbs-up'}
+        className={cn(
+          'rounded p-1 transition-all duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          feedback === 'thumbs-up'
+            ? 'text-foreground hover:bg-muted'
+            : 'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
+        )}
+      >
+        <ThumbsUp
+          className="h-3.5 w-3.5"
+          fill={feedback === 'thumbs-up' ? 'currentColor' : 'none'}
+        />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => handleFeedback('thumbs-down')}
+        aria-label="Not helpful"
+        aria-pressed={feedback === 'thumbs-down'}
+        className={cn(
+          'rounded p-1 transition-all duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          feedback === 'thumbs-down'
+            ? 'text-foreground hover:bg-muted'
+            : 'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
+        )}
+      >
+        <ThumbsDown
+          className="h-3.5 w-3.5"
+          fill={feedback === 'thumbs-down' ? 'currentColor' : 'none'}
+        />
+      </button>
+    </div>
+  )
+}
 
 function TypingIndicator({ tool }: { tool: string | null }) {
   return (
@@ -48,8 +169,8 @@ export function MessageList() {
         <div
           key={i}
           className={cn(
-            'flex',
-            msg.role === 'human' ? 'justify-end' : 'justify-start',
+            'flex flex-col',
+            msg.role === 'human' ? 'items-end' : 'items-start',
           )}
         >
           <div
@@ -82,6 +203,7 @@ export function MessageList() {
               </Markdown>
             )}
           </div>
+          {msg.role === 'ai' && <MessageActions text={msg.text} />}
         </div>
       ))}
 
