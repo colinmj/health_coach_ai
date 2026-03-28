@@ -8,6 +8,7 @@ import {
   createIntegrations, deleteIntegration,
 } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { useChatStore } from '@/stores/chatStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -79,6 +80,7 @@ function Tabs({ active, onChange }: { active: Tab; onChange: (t: Tab) => void })
 
 function ProfileTab() {
   const logout = useAuthStore((s) => s.logout)
+  const resetChat = useChatStore((s) => s.reset)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -116,6 +118,8 @@ function ProfileTab() {
   }
 
   function handleLogout() {
+    resetChat()
+    queryClient.clear()
     logout()
     navigate('/login', { replace: true })
   }
@@ -482,11 +486,13 @@ export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('profile')
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="text-xl font-semibold mb-6">Settings</h1>
-      <Tabs active={tab} onChange={setTab} />
-      {tab === 'profile' && <ProfileTab />}
-      {tab === 'integrations' && <IntegrationsTab />}
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-2xl px-4 py-8">
+        <h1 className="text-xl font-semibold mb-6">Settings</h1>
+        <Tabs active={tab} onChange={setTab} />
+        {tab === 'profile' && <ProfileTab />}
+        {tab === 'integrations' && <IntegrationsTab />}
+      </div>
     </div>
   )
 }

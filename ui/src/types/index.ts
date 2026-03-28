@@ -10,7 +10,7 @@ export interface Message {
   text: string
 }
 
-export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error'
+export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error' | 'suggested_questions'
 
 export interface StreamEvent {
   type: StreamEventType
@@ -18,6 +18,7 @@ export interface StreamEvent {
   name?: string
   session_id?: number
   error?: string
+  questions?: string[]
 }
 
 export interface Action {

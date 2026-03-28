@@ -1,11 +1,12 @@
 
 import datetime
+import json as _json
 from typing import AsyncGenerator
 from dotenv import load_dotenv
 
 from langchain_anthropic import ChatAnthropic
 
-from langchain_core.messages import HumanMessage, AIMessageChunk
+from langchain_core.messages import HumanMessage, AIMessageChunk, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 from agent.tools import build_tools
@@ -67,13 +68,14 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
     return lines
 
 
-def _fetch_user_units(user_id: int) -> str:
-    """Return the user's units preference ('metric' or 'imperial')."""
+def _fetch_user_profile(user_id: int) -> dict:
+    """Return user profile fields used in system prompt construction."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT units FROM users WHERE id = %s", (user_id,)
+            "SELECT name, units, date_of_birth, sex, height_cm FROM users WHERE id = %s",
+            (user_id,),
         ).fetchone()
-    return (row or {}).get("units", "metric")
+    return dict(row) if row else {}
 
 
 def build_context_block(user_id: int, current_session_id: int | None = None) -> str:
@@ -81,12 +83,25 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
     today = datetime.date.today()
     soon = today + datetime.timedelta(days=7)
 
-    units = _fetch_user_units(user_id)
+    profile = _fetch_user_profile(user_id)
+    units = profile.get("units", "metric")
     goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
     pinned_insights = [i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")]
     compliance_map = _fetch_compliance_map(user_id)
 
-    lines = [f"## User preferences\n- Units: {units}\n"]
+    profile_lines = [f"- Units: {units}"]
+    if profile.get("name"):
+        profile_lines.insert(0, f"- Name: {profile['name']}")
+    if profile.get("date_of_birth"):
+        dob = datetime.date.fromisoformat(profile["date_of_birth"])
+        age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        profile_lines.append(f"- Age: {age}")
+    if profile.get("sex"):
+        profile_lines.append(f"- Sex: {profile['sex']}")
+    if profile.get("height_cm"):
+        profile_lines.append(f"- Height: {profile['height_cm']} cm")
+
+    lines = ["## User profile\n" + "\n".join(profile_lines) + "\n"]
     lines.append("## Current goals, protocols & compliance\n")
     lines.extend(_format_goals_lines(goals, compliance_map, soon))
 
@@ -106,12 +121,32 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
     return "\n".join(lines)
 
 
+async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
+    """Make a single non-streaming LLM call to generate 2-3 follow-up questions."""
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0.7, timeout=None, stop=None)
+    response = await llm.ainvoke([
+        SystemMessage(content=(
+            "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
+            "the user might want to ask next. Output ONLY a JSON array of strings, nothing else. "
+            'Example: ["How does this compare to last week?", "What should I focus on tomorrow?"]'
+        )),
+        HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text}"),
+    ])
+    raw = response.content if isinstance(response.content, str) else ""
+    questions = _json.loads(raw)
+    if isinstance(questions, list):
+        return [q for q in questions if isinstance(q, str)][:3]
+    return []
+
+
 SYSTEM_PROMPT = """\
 You are a peak performance coach and personal health analytics assistant with access to real health data.
 
 Today's date is {today}.
 
 {context}
+
+When the user's name is provided in the context above, address them by their first name naturally — not on every message, but as a coach would with a regular client.
 
 ## Data sources
 - **Strength training (Hevy)**: lifting sessions, per-exercise 1RM history, performance tags \
@@ -121,6 +156,7 @@ heart rate, SpO2; sleep performance %, efficiency %, REM and slow-wave duration;
 individual activity sessions (strain, max/avg HR, calories burned, sport type)
 - **Body composition (Withings)**: weight (kg), fat ratio, muscle mass, fat-free mass, bone mass
 - **Nutrition (Cronometer)**: daily macros (carbs, protein, fat), calories, and micronutrients
+- **Bloodwork (lab upload)**: biomarker values with lab reference ranges and status (low/normal/high)
 
 ## Terminology — always use these terms consistently
 - **"strength session"** or **"lifting session"**: a workout logged in Hevy (barbell, dumbbell, \
@@ -169,15 +205,20 @@ exercise_template_id, then use that ID in subsequent calls.
 name exists in the data and to get the correct capitalisation.
 5. For correlation questions, use the dedicated correlation tools — they return \
 pre-aggregated rows. Narrate the pattern; do not compute statistics yourself.
-6. Convert milliseconds to hours/minutes when presenting sleep durations.
-7. Report numbers to one decimal place unless asked for more.
-8. Always present measurements in the user's preferred units (see context block). \
+6. When the user asks whether two variables are correlated or when you want to derive \
+an insight, call a correlation tool first, then follow up with analyze_correlation to \
+quantify the relationship statistically. Pass rows_json directly from the correlation \
+tool output. ALWAYS use "associated with" — NEVER "causes". Regression shows correlation only.
+7. Convert milliseconds to hours/minutes when presenting sleep durations.
+8. Report numbers to one decimal place unless asked for more.
+9. Always present measurements in the user's preferred units (see context block). \
 If units=imperial: convert weight kg→lbs (×2.205), distance km→miles (×0.621), \
 height cm→ft/in. If units=metric, present as-is. All data is stored in metric — \
 convert at presentation time only.
-9. If data is missing for a date, say so clearly.
-10. Lead with the direct answer, then supporting data. Keep responses concise.
-11. Never output raw JSON in your responses — always present data in plain language.
+10. If data is missing for a date, say so clearly.
+11. Lead with the direct answer, then supporting data. Keep responses concise.
+12. Never output raw JSON in your responses — always present data in plain language.
+13. For bloodwork questions, always include a recommendation to consult a doctor for clinical interpretation. Never diagnose or prescribe based on biomarker values.
 
 ## Goal setting
 
@@ -199,6 +240,7 @@ user what they'd need — do NOT call create_goal:
   Improve sleep or recovery         | recovery (Whoop)
   Eat more protein / hit macros     | nutrition (Cronometer)
   Cardio / sport performance        | recovery (Whoop activities)
+  Improve a biomarker (e.g. raise vitamin D)  | bloodwork
 
 If a domain is missing: "To track [goal], you'd need [source] connected. Without it I \
 can't measure progress." Do NOT call create_goal.
@@ -335,6 +377,26 @@ async def astream_run(
         assert isinstance(final_state, dict)
         new_messages = final_state["messages"][len(history):]
         sessions.append_messages(session_id, new_messages)
+
+        try:
+            human_msg = next(
+                (m for m in reversed(final_state["messages"]) if isinstance(m, HumanMessage)),
+                None,
+            )
+            ai_msg = final_state["messages"][-1]
+            ai_text = (
+                ai_msg.content if isinstance(ai_msg.content, str)
+                else " ".join(
+                    b.get("text", "") for b in ai_msg.content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            )
+            if human_msg and ai_text:
+                questions = await _generate_followups(human_msg.content, ai_text)
+                if questions:
+                    yield {"type": "suggested_questions", "questions": questions}
+        except Exception:
+            pass  # non-critical — never block the done event
 
     yield {"type": "done", "session_id": session_id}
 

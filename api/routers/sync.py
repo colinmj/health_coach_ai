@@ -7,10 +7,10 @@ from sync.hevy import sync_workouts
 from sync.whoop import sync_whoop
 from sync.withings import sync_withings
 from sync.oura import sync_oura
-from sync.strava import sync_strava
-from sync.cronometer import sync_csv_content
+from sync.cronometer import auto_sync_csv
 from sync.strong import sync_strong_csv
 from sync.apple_health import sync_apple_health_xml
+from sync.bloodwork import extract_biomarkers, upsert_biomarkers
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -35,7 +35,6 @@ def _run_pending_syncs(user_id: int) -> None:
         "whoop":    sync_whoop,
         "withings": sync_withings,
         "oura":     sync_oura,
-        "strava":   sync_strava,
     }
 
     for source, handler in _SYNC_HANDLERS.items():
@@ -65,11 +64,16 @@ async def upload_csv(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user_id),
 ) -> dict:
-    """Accept a Cronometer Daily Summary CSV, upsert into nutrition_daily."""
+    """Accept a Cronometer CSV (Daily Summary or Servings format).
+
+    Auto-detects the format from the first column header:
+    - "Date" → Daily Summary → upserts into nutrition_daily
+    - "Day"  → Servings     → upserts into nutrition_foods
+    """
     content = await file.read()
     try:
         with get_connection() as conn:
-            rows = sync_csv_content(content, user_id, conn)
+            result = auto_sync_csv(content, user_id, conn)
             conn.execute(
                 "UPDATE user_integrations SET last_synced_at=NOW() WHERE user_id=%s AND source='cronometer'",
                 (user_id,),
@@ -77,7 +81,7 @@ async def upload_csv(
             conn.commit()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return {"rows_imported": rows}
+    return result
 
 
 @router.post("/upload-strong")
@@ -118,6 +122,28 @@ async def upload_apple_health(
     except (ValueError, Exception) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"rows_imported": counts}
+
+
+@router.post("/upload-bloodwork")
+async def upload_bloodwork(
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Accept a bloodwork PDF or image, extract biomarkers via Claude, and upsert into the database."""
+    content = await file.read()
+    content_type = file.content_type or "application/pdf"
+    try:
+        rows = extract_biomarkers(content, content_type)
+        with get_connection() as conn:
+            count = upsert_biomarkers(rows, user_id, conn)
+            conn.execute(
+                "UPDATE user_integrations SET last_synced_at=NOW() WHERE user_id=%s AND source='bloodwork'",
+                (user_id,),
+            )
+            conn.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"biomarkers_imported": count}
 
 
 @router.get("/status")

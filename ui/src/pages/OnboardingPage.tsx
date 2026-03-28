@@ -34,7 +34,7 @@ const SETUP_NOTES: Record<string, { text: string; inputLabel?: string; inputPlac
     text: 'Once setup is complete, connect your Withings account from the sidebar.',
   },
   cronometer: {
-    text: 'Export a Daily Summary CSV from Cronometer and upload it from your dashboard.',
+    text: 'Upload a Daily Summary or Servings CSV from Cronometer via the sidebar.',
   },
 }
 

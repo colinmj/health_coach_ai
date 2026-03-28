@@ -122,7 +122,11 @@ export async function triggerSync(): Promise<void> {
   if (!res.ok) throw new Error('Failed to trigger sync')
 }
 
-export async function uploadCsvFile(file: File): Promise<{ rows_imported: number }> {
+type UploadCsvResult =
+  | { rows_imported: number }
+  | { inserted: number; days: number }
+
+export async function uploadCsvFile(file: File): Promise<UploadCsvResult> {
   const form = new FormData()
   form.append('file', file)
   const res = await apiFetch(`${BASE}/sync/upload-csv`, { method: 'POST', body: form })
@@ -162,6 +166,7 @@ export function streamChat(
     onToolStart: (name: string) => void
     onDone: (sessionId: number) => void
     onError: (err: Error) => void
+    onSuggestedQuestions: (questions: string[]) => void
   },
   signal: AbortSignal,
 ) {
@@ -174,6 +179,7 @@ export function streamChat(
       const event: StreamEvent = JSON.parse(ev.data)
       if (event.type === 'token' && event.text) handlers.onToken(event.text)
       else if (event.type === 'tool_start' && event.name) handlers.onToolStart(event.name)
+      else if (event.type === 'suggested_questions' && event.questions) handlers.onSuggestedQuestions(event.questions)
       else if (event.type === 'done' && event.session_id != null) handlers.onDone(event.session_id)
       else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
     },

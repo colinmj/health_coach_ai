@@ -12,7 +12,7 @@ from agent.tools.recovery import (
     get_sleep,
 )
 from agent.tools.body_composition import get_body_composition
-from agent.tools.nutrition import get_nutrition
+from agent.tools.nutrition import get_food_entries, get_nutrition
 from agent.tools.correlations import (
     get_hrv_vs_performance,
     get_sleep_vs_performance,
@@ -35,6 +35,15 @@ from agent.tools.goals import (
     check_compliance,
     update_goal_status,
     assess_protocol,
+    update_action,
+)
+from agent.tools.analyze_correlation import analyze_correlation
+from agent.tools.bloodwork import get_biomarkers
+from agent.tools.food_correlations import (
+    get_food_vs_performance,
+    get_food_vs_sleep,
+    get_food_vs_recovery,
+    get_food_vs_body_composition,
 )
 
 TOOL_REGISTRY: list[tuple] = [
@@ -49,6 +58,7 @@ TOOL_REGISTRY: list[tuple] = [
     (get_sleep,                          {"recovery"},                  {}),
     (get_body_composition,               {"body_composition"},          {}),
     (get_nutrition,                      {"nutrition"},                 {}),
+    (get_food_entries,                   {"nutrition"},                 {}),
     (get_hrv_vs_performance,             {"recovery", "strength"},      {"strength": "hevy"}),
     (get_sleep_vs_performance,           {"recovery", "strength"},      {"strength": "hevy"}),
     (get_sleep_threshold_vs_performance, {"recovery", "strength"},      {"strength": "hevy"}),
@@ -68,6 +78,13 @@ TOOL_REGISTRY: list[tuple] = [
     (check_compliance,                   set(),                         {}),
     (update_goal_status,                 set(),                         {}),
     (assess_protocol,                    set(),                         {}),
+    (update_action,                      set(),                         {}),
+    (analyze_correlation,                set(),                         {}),
+    (get_biomarkers,                     {"bloodwork"},                 {}),
+    (get_food_vs_performance,            {"nutrition", "strength"},     {"strength": "hevy"}),
+    (get_food_vs_sleep,                  {"nutrition", "recovery"},     {}),
+    (get_food_vs_recovery,               {"nutrition", "recovery"},     {}),
+    (get_food_vs_body_composition,       {"nutrition", "body_composition"}, {}),
 ]
 
 

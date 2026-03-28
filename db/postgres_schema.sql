@@ -291,6 +291,42 @@ CREATE TABLE IF NOT EXISTS nutrition_daily (
 
 
 -- -----------------------------------------------------------------------------
+-- Nutrition — Cronometer Servings / food-item level (CSV export)
+-- Each row is one food item logged in a meal; no UNIQUE constraint because
+-- the same food can appear multiple times in a day. Idempotency is handled
+-- by DELETE-then-INSERT on the affected date range at sync time.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nutrition_foods (
+    id                     SERIAL      PRIMARY KEY,
+    user_id                INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- date of the log entry; joined to nutrition_daily and workouts on this column
+    date                   DATE        NOT NULL,
+    -- time-of-day the item was logged (NULL when not present in export)
+    logged_at              TIME,
+    meal_group             TEXT,       -- e.g. 'Breakfast', 'Lunch', 'Dinner', 'Snack'
+    food_name              TEXT        NOT NULL,
+    amount                 TEXT,       -- raw string from CSV, e.g. "1 cup"
+    category               TEXT,
+    energy_kcal            REAL, alcohol_g REAL, caffeine_mg REAL, oxalate_mg REAL,
+    phytate_mg REAL, water_g REAL, b1_thiamine_mg REAL, b2_riboflavin_mg REAL,
+    b3_niacin_mg REAL, b5_pantothenic_acid_mg REAL, b6_pyridoxine_mg REAL,
+    b12_cobalamin_ug REAL, folate_ug REAL, vitamin_a_ug REAL, vitamin_c_mg REAL,
+    vitamin_d_iu REAL, vitamin_e_mg REAL, vitamin_k_ug REAL, calcium_mg REAL,
+    copper_mg REAL, iron_mg REAL, magnesium_mg REAL, manganese_mg REAL,
+    phosphorus_mg REAL, potassium_mg REAL, selenium_ug REAL, sodium_mg REAL,
+    zinc_mg REAL, net_carbs_g REAL, carbs_g REAL, fiber_g REAL,
+    insoluble_fiber_g REAL, soluble_fiber_g REAL, starch_g REAL, sugars_g REAL,
+    added_sugars_g REAL, fat_g REAL, cholesterol_mg REAL, monounsaturated_g REAL,
+    polyunsaturated_g REAL, saturated_g REAL, trans_fats_g REAL, omega3_g REAL,
+    omega6_g REAL, ala_g REAL, dha_g REAL, epa_g REAL, aa_g REAL, la_g REAL,
+    cystine_g REAL, histidine_g REAL, isoleucine_g REAL, leucine_g REAL,
+    lysine_g REAL, methionine_g REAL, phenylalanine_g REAL, protein_g REAL,
+    threonine_g REAL, tryptophan_g REAL, tyrosine_g REAL, valine_g REAL
+);
+CREATE INDEX IF NOT EXISTS idx_nutrition_foods_user_date ON nutrition_foods (user_id, date);
+
+
+-- -----------------------------------------------------------------------------
 -- Strength — Strong app (CSV export)
 -- -----------------------------------------------------------------------------
 
@@ -467,6 +503,24 @@ CREATE INDEX IF NOT EXISTS idx_compliance_action_week     ON action_compliance (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_protocols_one_active_per_goal
     ON protocols (goal_id) WHERE (status = 'active');
 
+-- Bloodwork / lab results (values encrypted at rest)
+CREATE TABLE IF NOT EXISTS biomarkers (
+    id              SERIAL PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    test_date       DATE NOT NULL,
+    marker_name     TEXT NOT NULL,
+    value           TEXT NOT NULL,
+    unit            TEXT,
+    reference_low   TEXT,
+    reference_high  TEXT,
+    status          TEXT,
+    source          TEXT NOT NULL DEFAULT 'pdf_upload'
+                        CHECK (source IN ('pdf_upload', 'photo', 'manual')),
+    synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, test_date, marker_name)
+);
+CREATE INDEX IF NOT EXISTS idx_biomarkers_user_date ON biomarkers (user_id, test_date);
+
 -- Migrate: allow direct goal→action (no protocol required)
 ALTER TABLE actions ADD COLUMN IF NOT EXISTS goal_id INTEGER REFERENCES goals(id) ON DELETE CASCADE;
 ALTER TABLE actions ALTER COLUMN protocol_id DROP NOT NULL;
@@ -484,6 +538,9 @@ ALTER TABLE protocols ADD COLUMN IF NOT EXISTS title TEXT;
 -- Migrate: add short title to goals and insights
 ALTER TABLE goals    ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE insights ADD COLUMN IF NOT EXISTS title TEXT;
+
+-- Migrate: track action modifications
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 
 -- -----------------------------------------------------------------------------

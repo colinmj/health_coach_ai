@@ -9,3 +9,6 @@ fastapi
 uvicorn[standard]
 python-jose[cryptography]
 python-multipart
+scipy
+numpy
+cryptography

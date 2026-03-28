@@ -3,6 +3,7 @@ import Markdown from 'markdown-to-jsx'
 import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { cn } from '@/lib/utils'
+import { StarterPrompts } from './StarterPrompts'
 
 /** Strips all common markdown syntax, leaving plain text suitable for clipboard. */
 function stripMarkdown(text: string): string {
@@ -156,11 +157,7 @@ export function MessageList() {
   }, [messages, isStreaming])
 
   if (messages.length === 0 && !isStreaming) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-        Ask me anything about your health data.
-      </div>
-    )
+    return <StarterPrompts />
   }
 
   return (

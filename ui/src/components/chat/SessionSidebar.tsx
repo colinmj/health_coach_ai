@@ -17,7 +17,7 @@ interface SessionSidebarProps {
 }
 
 export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps) {
-  const { activeSessionId, setActiveSessionId, setMessages, startNewChat } = useChatStore()
+  const { activeSessionId, setActiveSessionId, setMessages, startNewChat, clearSuggestedQuestions } = useChatStore()
 
   const { data: sessions, isLoading } = useQuery({
     queryKey: ['sessions'],
@@ -29,6 +29,7 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
     if (id === activeSessionId) return
     const messages = await getMessages(id)
     setMessages(messages)
+    clearSuggestedQuestions()
     setActiveSessionId(id)
     if (isMobile) onClose()
   }
@@ -44,7 +45,7 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
         'flex flex-col border-r bg-sidebar transition-transform duration-200',
         isMobile
           ? 'fixed inset-y-0 left-0 z-30 w-full max-w-xs'
-          : 'w-64 shrink-0',
+          : 'h-full w-64 shrink-0',
         isMobile && !open && '-translate-x-full',
       )}
     >
@@ -64,7 +65,7 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
 
       <Separator />
 
-      <ScrollArea className="flex-1 px-2 py-2">
+      <ScrollArea className="min-h-0 flex-1 px-2 py-2">
         {isLoading && (
           <div className="flex flex-col gap-2 px-2 py-1">
             {Array.from({ length: 5 }).map((_, i) => (

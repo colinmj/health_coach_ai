@@ -4,7 +4,7 @@ import { getSyncStatus, triggerSync, uploadCsvFile } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { ExternalLink, Loader2, RefreshCw, Upload } from 'lucide-react'
+import { Check, ExternalLink, Loader2, RefreshCw, Upload } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -24,11 +24,13 @@ function IntegrationRow({
   onUpload,
   uploading,
   uploadError,
+  uploadSuccess,
 }: {
   integration: SyncIntegration
   onUpload?: () => void
   uploading?: boolean
   uploadError?: string | null
+  uploadSuccess?: string | false
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -83,6 +85,12 @@ function IntegrationRow({
       {uploadError && (
         <p className="text-xs text-destructive pl-3">{uploadError}</p>
       )}
+      {uploadSuccess && !uploadError && (
+        <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 pl-3">
+          <Check className="h-3 w-3" aria-hidden="true" />
+          {uploadSuccess}
+        </p>
+      )}
     </div>
   )
 }
@@ -92,6 +100,7 @@ export function SyncStatus() {
   const [syncing, setSyncing] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState<string | false>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: integrations, isLoading, isError } = useQuery({
@@ -116,6 +125,7 @@ export function SyncStatus() {
 
   function handleUploadClick() {
     setUploadError(null)
+    setUploadSuccess(false)
     fileInputRef.current?.click()
   }
 
@@ -127,8 +137,13 @@ export function SyncStatus() {
     setUploading(true)
     setUploadError(null)
     try {
-      await uploadCsvFile(file)
+      const result = await uploadCsvFile(file)
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+      const msg = 'rows_imported' in result
+        ? `${result.rows_imported} day${result.rows_imported === 1 ? '' : 's'} imported`
+        : `${result.inserted} food item${result.inserted === 1 ? '' : 's'} imported across ${result.days} day${result.days === 1 ? '' : 's'}`
+      setUploadSuccess(msg)
+      setTimeout(() => setUploadSuccess(false), 3000)
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -201,6 +216,7 @@ export function SyncStatus() {
                   onUpload={handleUploadClick}
                   uploading={uploading}
                   uploadError={uploadError}
+                  uploadSuccess={uploadSuccess}
                 />
               ))}
             </div>

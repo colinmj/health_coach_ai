@@ -20,8 +20,16 @@ interface ChatState {
   setIsStreaming: (streaming: boolean) => void
   setStreamingTool: (tool: string | null) => void
 
+  // Follow-up question chips
+  suggestedQuestions: string[]
+  setSuggestedQuestions: (questions: string[]) => void
+  clearSuggestedQuestions: () => void
+
   // Start a new chat (clear active session)
   startNewChat: () => void
+
+  // Reset all state (used on logout)
+  reset: () => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -51,6 +59,13 @@ export const useChatStore = create<ChatState>((set) => ({
   setIsStreaming: (isStreaming) => set({ isStreaming }),
   setStreamingTool: (streamingTool) => set({ streamingTool }),
 
+  suggestedQuestions: [],
+  setSuggestedQuestions: (suggestedQuestions) => set({ suggestedQuestions }),
+  clearSuggestedQuestions: () => set({ suggestedQuestions: [] }),
+
   startNewChat: () =>
-    set({ activeSessionId: null, messages: [], streamingTool: null, isStreaming: false }),
+    set({ activeSessionId: null, messages: [], streamingTool: null, isStreaming: false, suggestedQuestions: [] }),
+
+  reset: () =>
+    set({ sessions: [], activeSessionId: null, messages: [], isStreaming: false, streamingTool: null, suggestedQuestions: [] }),
 }))

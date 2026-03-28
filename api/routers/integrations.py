@@ -48,14 +48,6 @@ CATALOGUE = [
         "env_key":     "GARMIN_CLIENT_ID",
     },
     {
-        "source":      "strava",
-        "label":       "Strava",
-        "description": "Runs, rides, swims and other cardio",
-        "auth_type":   "oauth",
-        "data_types":  ["activities"],
-        "env_key":     "STRAVA_CLIENT_ID",
-    },
-    {
         "source":      "apple_health",
         "label":       "Apple Health",
         "description": "All domains — export from the Health app",
@@ -77,6 +69,14 @@ CATALOGUE = [
         "description": "Macros, vitamins, minerals — CSV upload",
         "auth_type":   "upload",
         "data_types":  ["nutrition"],
+        "env_key":     None,
+    },
+    {
+        "source":      "bloodwork",
+        "label":       "Bloodwork",
+        "description": "Lab results — PDF or photo upload",
+        "auth_type":   "upload",
+        "data_types":  ["bloodwork"],
         "env_key":     None,
     },
 ]

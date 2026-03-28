@@ -1,63 +1,18 @@
-import { useRef, useState } from 'react'
-import { useChatStore } from '@/stores/chatStore'
-import { streamChat } from '@/lib/api'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ArrowUp, Square } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useSendMessage } from '@/hooks/useSendMessage'
+import { FollowUpChips } from './FollowUpChips'
 
 export function ChatInput() {
   const [input, setInput] = useState('')
-  const abortRef = useRef<AbortController | null>(null)
-  const queryClient = useQueryClient()
-
-  const {
-    activeSessionId,
-    isStreaming,
-    addMessage,
-    appendToken,
-    setIsStreaming,
-    setStreamingTool,
-    setActiveSessionId,
-  } = useChatStore()
-
-  function handleStop() {
-    abortRef.current?.abort()
-    setIsStreaming(false)
-    setStreamingTool(null)
-  }
+  const { sendMessage, stop, isStreaming } = useSendMessage()
 
   function handleSubmit() {
     const query = input.trim()
     if (!query || isStreaming) return
-
     setInput('')
-    addMessage({ role: 'human', text: query })
-    setIsStreaming(true)
-    setStreamingTool(null)
-
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-
-    streamChat(
-      query,
-      activeSessionId,
-      {
-        onToken: appendToken,
-        onToolStart: (name) => setStreamingTool(name),
-        onDone: (sessionId) => {
-          setActiveSessionId(sessionId)
-          setIsStreaming(false)
-          setStreamingTool(null)
-          queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        },
-        onError: () => {
-          setIsStreaming(false)
-          setStreamingTool(null)
-          queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        },
-      },
-      ctrl.signal,
-    )
+    sendMessage(query)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -69,6 +24,7 @@ export function ChatInput() {
 
   return (
     <div className="border-t bg-background px-4 py-4">
+      <FollowUpChips />
       <div className="relative flex items-end gap-2 rounded-2xl border bg-muted/30 px-4 py-3">
         <textarea
           className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
@@ -85,7 +41,7 @@ export function ChatInput() {
           }}
         />
         {isStreaming ? (
-          <Button size="icon" variant="destructive" className="shrink-0" onClick={handleStop}>
+          <Button size="icon" variant="destructive" className="shrink-0" onClick={stop}>
             <Square className="h-4 w-4" />
           </Button>
         ) : (

@@ -317,3 +317,99 @@ def assess_protocol(protocol_id: str, outcome: str) -> str:
     if not result:
         return f"Protocol {protocol_id} not found."
     return json.dumps({"updated": True, "protocol_id": int(protocol_id), "outcome": outcome})
+
+
+@tool
+def update_action(
+    action_id: str,
+    action_text: str = "",
+    condition: str = "",
+    target_value: str = "",
+    frequency: str = "",
+) -> str:
+    """Update one or more fields on an existing action.
+
+    action_id: the action's numeric ID (from get_goals output).
+    action_text: new human-readable description. Leave blank to keep current.
+    condition: 'less_than', 'greater_than', or 'equals'. Leave blank to keep current.
+    target_value: new numeric target (e.g. '2600'). Leave blank to keep current.
+    frequency: 'daily' or 'weekly'. Leave blank to keep current.
+
+    metric and data_source cannot be changed — create a new action instead.
+    At least one field must be provided.
+    """
+    if condition and condition not in ("less_than", "greater_than", "equals"):
+        return f"Invalid condition '{condition}'. Must be 'less_than', 'greater_than', or 'equals'."
+    if frequency and frequency not in ("daily", "weekly"):
+        return f"Invalid frequency '{frequency}'. Must be 'daily' or 'weekly'."
+
+    target_float: float | None = None
+    if target_value.strip():
+        try:
+            target_float = float(target_value)
+        except ValueError:
+            return f"Invalid target_value '{target_value}'. Must be a number."
+
+    # Whitelist of mutable fields — keys never come from user input (safe dynamic SQL)
+    updates: dict[str, object] = {}
+    if action_text.strip():
+        updates["action_text"] = action_text.strip()
+    if condition:
+        updates["condition"] = condition
+    if target_float is not None:
+        updates["target_value"] = target_float
+    if frequency:
+        updates["frequency"] = frequency
+
+    if not updates:
+        return "No fields provided. Supply at least one of: action_text, condition, target_value, frequency."
+
+    user_id = get_request_user_id()
+    set_clause = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = NOW()"
+    values = list(updates.values()) + [int(action_id), user_id]
+
+    with get_connection() as conn:
+        result = conn.execute(
+            f"UPDATE actions SET {set_clause} WHERE id = %s AND user_id = %s "  # noqa: S608
+            "RETURNING id, action_text, condition, target_value, frequency",
+            values,
+        ).fetchone()
+
+        if not result:
+            return f"Action {action_id} not found."
+
+        # Sync current week's compliance row when target_value changed
+        if target_float is not None:
+            today = datetime.date.today()
+            week_start = today - datetime.timedelta(days=today.weekday())
+            compliance_row = conn.execute(
+                "SELECT actual_value FROM action_compliance "
+                "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
+                (int(action_id), week_start, user_id),
+            ).fetchone()
+            if compliance_row:
+                actual = compliance_row["actual_value"]
+                effective_condition = condition or result["condition"]
+                if actual is not None:
+                    if effective_condition == "less_than":
+                        met = float(actual) < target_float
+                    elif effective_condition == "greater_than":
+                        met = float(actual) > target_float
+                    else:
+                        met = abs(float(actual) - target_float) < 0.001
+                else:
+                    met = None
+                conn.execute(
+                    "UPDATE action_compliance SET target_value = %s, met = %s "
+                    "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
+                    (target_float, met, int(action_id), week_start, user_id),
+                )
+
+    return json.dumps({
+        "updated": True,
+        "action_id": int(action_id),
+        "action_text": result["action_text"],
+        "condition": result["condition"],
+        "target_value": float(result["target_value"]),
+        "frequency": result["frequency"],
+    })
