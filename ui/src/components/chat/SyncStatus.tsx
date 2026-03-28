@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSyncStatus, triggerSync, uploadCsvFile } from '@/lib/api'
+import { getSyncStatus, triggerSync, uploadCsvFile, uploadAppleHealthFile } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -63,21 +63,23 @@ function IntegrationRow({
           )}
           {onUpload && (
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-5 w-5"
-                  onClick={onUpload}
-                  disabled={uploading}
-                >
-                  {uploading
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <Upload className="h-3 w-3" />
-                  }
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">Upload CSV</TooltipContent>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-5 w-5"
+                    onClick={onUpload}
+                    disabled={uploading}
+                  >
+                    {uploading
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Upload className="h-3 w-3" />
+                    }
+                  </Button>
+                }
+              />
+              <TooltipContent side="left">{integration.source === 'apple_health' ? 'Upload ZIP' : 'Upload CSV'}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -102,6 +104,7 @@ export function SyncStatus() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState<string | false>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const activeUploadSourceRef = useRef<string>('cronometer')
 
   const { data: integrations, isLoading, isError } = useQuery({
     queryKey: ['sync-status'],
@@ -123,7 +126,11 @@ export function SyncStatus() {
     }
   }
 
-  function handleUploadClick() {
+  function handleUploadClick(source: string) {
+    activeUploadSourceRef.current = source
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = source === 'apple_health' ? '.zip' : '.csv'
+    }
     setUploadError(null)
     setUploadSuccess(false)
     fileInputRef.current?.click()
@@ -137,11 +144,23 @@ export function SyncStatus() {
     setUploading(true)
     setUploadError(null)
     try {
-      const result = await uploadCsvFile(file)
+      const source = activeUploadSourceRef.current
+      const result = source === 'apple_health'
+        ? await uploadAppleHealthFile(file)
+        : await uploadCsvFile(file)
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
-      const msg = 'rows_imported' in result
-        ? `${result.rows_imported} day${result.rows_imported === 1 ? '' : 's'} imported`
-        : `${result.inserted} food item${result.inserted === 1 ? '' : 's'} imported across ${result.days} day${result.days === 1 ? '' : 's'}`
+      let msg: string
+      if (source === 'apple_health') {
+        const r = result as unknown as { rows_imported: Record<string, number> }
+        msg = Object.entries(r.rows_imported)
+          .filter(([, n]) => n > 0)
+          .map(([k, n]) => `${n} ${k.replace('_', ' ')}`)
+          .join(', ') || 'No new records'
+      } else if ('inserted' in result) {
+        msg = `${result.inserted} food item${result.inserted === 1 ? '' : 's'} imported across ${result.days} day${result.days === 1 ? '' : 's'}`
+      } else {
+        msg = `${result.rows_imported} day${result.rows_imported === 1 ? '' : 's'} imported`
+      }
       setUploadSuccess(msg)
       setTimeout(() => setUploadSuccess(false), 3000)
     } catch (err) {
@@ -213,7 +232,7 @@ export function SyncStatus() {
                 <IntegrationRow
                   key={i.source}
                   integration={i}
-                  onUpload={handleUploadClick}
+                  onUpload={() => handleUploadClick(i.source)}
                   uploading={uploading}
                   uploadError={uploadError}
                   uploadSuccess={uploadSuccess}

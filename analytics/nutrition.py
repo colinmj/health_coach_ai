@@ -1,3 +1,5 @@
+import datetime
+
 from db.schema import get_connection
 
 
@@ -8,7 +10,10 @@ def get_food_entries(
     meal_group: str | None = None,
 ) -> list[dict]:
     """Individual food items logged in Cronometer (Servings export).
-    Optionally filtered by date range (YYYY-MM-DD) and/or meal group."""
+    Optionally filtered by date range (YYYY-MM-DD) and/or meal group.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["user_id = %s"]
     params: list = [user_id]
     if since is not None:
@@ -38,7 +43,10 @@ def get_nutrition(
     until: str | None = None,
 ) -> list[dict]:
     """Macros and key performance micros per day from Cronometer.
-    Optionally filtered by date range (YYYY-MM-DD)."""
+    Optionally filtered by date range (YYYY-MM-DD).
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:

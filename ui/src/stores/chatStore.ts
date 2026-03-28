@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { Message, Session } from '@/types'
+import type { ConfirmRequiredEvent, Message, Session } from '@/types'
+
+interface ConfirmState {
+  open: boolean
+  event: ConfirmRequiredEvent | null
+  pendingQuery: string
+  pendingSessionId: number | null
+}
 
 interface ChatState {
   // Sessions
@@ -25,6 +32,11 @@ interface ChatState {
   setSuggestedQuestions: (questions: string[]) => void
   clearSuggestedQuestions: () => void
 
+  // Confirmation modal state
+  confirmState: ConfirmState
+  setConfirmState: (state: ConfirmState) => void
+  clearConfirmState: () => void
+
   // Start a new chat (clear active session)
   startNewChat: () => void
 
@@ -49,7 +61,7 @@ export const useChatStore = create<ChatState>((set) => ({
       } else {
         messages.push({ role: 'ai', text: token })
       }
-      return { messages }
+      return { messages, streamingTool: null }
     }),
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
@@ -63,9 +75,13 @@ export const useChatStore = create<ChatState>((set) => ({
   setSuggestedQuestions: (suggestedQuestions) => set({ suggestedQuestions }),
   clearSuggestedQuestions: () => set({ suggestedQuestions: [] }),
 
+  confirmState: { open: false, event: null, pendingQuery: '', pendingSessionId: null },
+  setConfirmState: (confirmState) => set({ confirmState }),
+  clearConfirmState: () => set({ confirmState: { open: false, event: null, pendingQuery: '', pendingSessionId: null } }),
+
   startNewChat: () =>
     set({ activeSessionId: null, messages: [], streamingTool: null, isStreaming: false, suggestedQuestions: [] }),
 
   reset: () =>
-    set({ sessions: [], activeSessionId: null, messages: [], isStreaming: false, streamingTool: null, suggestedQuestions: [] }),
+    set({ sessions: [], activeSessionId: null, messages: [], isStreaming: false, streamingTool: null, suggestedQuestions: [], confirmState: { open: false, event: null, pendingQuery: '', pendingSessionId: null } }),
 }))

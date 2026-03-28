@@ -2,9 +2,10 @@ import { useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useChatStore } from '@/stores/chatStore'
 import { streamChat } from '@/lib/api'
+import type { ConfirmRequiredEvent } from '@/types'
 
 interface UseSendMessageReturn {
-  sendMessage: (query: string) => void
+  sendMessage: (query: string, confirmed?: boolean) => void
   stop: () => void
   isStreaming: boolean
 }
@@ -23,40 +24,61 @@ export function useSendMessage(): UseSendMessageReturn {
     setActiveSessionId,
     setSuggestedQuestions,
     clearSuggestedQuestions,
+    setConfirmState,
+    clearConfirmState,
   } = useChatStore()
 
-  function sendMessage(query: string) {
+  function sendMessage(query: string, confirmed = false) {
     const trimmed = query.trim()
     if (!trimmed || isStreaming) return
 
     clearSuggestedQuestions()
-    addMessage({ role: 'human', text: trimmed })
+    clearConfirmState()
+    if (!confirmed) {
+      // Only add the human message on the first send, not on confirmed re-run
+      addMessage({ role: 'human', text: trimmed })
+    }
     setIsStreaming(true)
     setStreamingTool(null)
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
+    const sessionId = useChatStore.getState().activeSessionId
+
     streamChat(
       trimmed,
-      activeSessionId,
+      sessionId,
       {
         onToken: appendToken,
         onToolStart: (name) => setStreamingTool(name),
         onSuggestedQuestions: setSuggestedQuestions,
-        onDone: (sessionId) => {
-          setActiveSessionId(sessionId)
+        onDone: (sid) => {
+          setActiveSessionId(sid)
           setIsStreaming(false)
           setStreamingTool(null)
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
         },
-        onError: () => {
+        onError: (err) => {
+          console.error('[chat stream error]', err)
+          addMessage({ role: 'ai', text: 'Sorry, something went wrong. Please try again.' })
           setIsStreaming(false)
           setStreamingTool(null)
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        },
+        onConfirmRequired: (event: ConfirmRequiredEvent) => {
+          setIsStreaming(false)
+          setStreamingTool(null)
+          setConfirmState({
+            open: true,
+            event,
+            pendingQuery: trimmed,
+            pendingSessionId: sessionId,
+          })
         },
       },
       ctrl.signal,
+      confirmed,
     )
   }
 

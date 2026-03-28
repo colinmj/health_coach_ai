@@ -1,3 +1,5 @@
+import datetime
+
 from db.schema import get_connection
 
 
@@ -201,7 +203,10 @@ def get_nutrition_vs_performance(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Pairs each workout's performance score with same-day nutrition data."""
+    """Pairs each workout's performance score with same-day nutrition data.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -239,7 +244,10 @@ def get_protein_vs_strength(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Pairs daily protein intake with average session 1RM on the same day."""
+    """Pairs daily protein intake with average session 1RM on the same day.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -324,7 +332,10 @@ def get_nutrition_vs_recovery(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Pairs prior-day nutrition with next-day recovery score."""
+    """Pairs prior-day nutrition with next-day recovery score.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -454,7 +465,10 @@ def get_nutrition_vs_body_composition(
     until: str | None = None,
     days_window: int = 7,
 ) -> list[dict]:
-    """For each nutrition day, finds the nearest body measurement within days_window days."""
+    """For each nutrition day, finds the nearest body measurement within days_window days.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:

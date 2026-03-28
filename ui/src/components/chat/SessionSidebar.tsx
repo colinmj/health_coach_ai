@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PenSquare, MessageCircle, X } from 'lucide-react'
+import { PenSquare, MessageCircle, Pin, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 import { SyncStatus } from './SyncStatus'
+import { SessionActions } from './SessionActions'
+import type { Session } from '@/types'
 
 interface SessionSidebarProps {
   isMobile: boolean
@@ -38,6 +40,16 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
     startNewChat()
     if (isMobile) onClose()
   }
+
+  function handleSessionDeleted(session: Session) {
+    // If the deleted session was active, navigate away to a new chat
+    if (session.id === activeSessionId) {
+      startNewChat()
+    }
+  }
+
+  const pinnedSessions = sessions?.filter((s) => s.pinned) ?? []
+  const unpinnedSessions = sessions?.filter((s) => !s.pinned) ?? []
 
   return (
     <aside
@@ -74,25 +86,32 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
           </div>
         )}
 
-        {sessions?.map((session) => (
-          <button
+        {pinnedSessions.length > 0 && (
+          <>
+            <p className="px-3 pb-1 pt-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Pinned
+            </p>
+            {pinnedSessions.map((session) => (
+              <SessionRow
+                key={session.id}
+                session={session}
+                isActive={activeSessionId === session.id}
+                onSelect={handleSelectSession}
+                onDeleted={() => handleSessionDeleted(session)}
+              />
+            ))}
+            {unpinnedSessions.length > 0 && <div className="my-1" />}
+          </>
+        )}
+
+        {unpinnedSessions.map((session) => (
+          <SessionRow
             key={session.id}
-            onClick={() => handleSelectSession(session.id)}
-            className={cn(
-              'flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent',
-              activeSessionId === session.id && 'bg-sidebar-accent',
-            )}
-          >
-            <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-medium text-sidebar-foreground">
-                {session.title || 'New conversation'}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {formatDistanceToNow(new Date(session.created_at), { addSuffix: true })}
-              </div>
-            </div>
-          </button>
+            session={session}
+            isActive={activeSessionId === session.id}
+            onSelect={handleSelectSession}
+            onDeleted={() => handleSessionDeleted(session)}
+          />
         ))}
 
         {sessions?.length === 0 && !isLoading && (
@@ -102,5 +121,59 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
 
       <SyncStatus />
     </aside>
+  )
+}
+
+interface SessionRowProps {
+  session: Session
+  isActive: boolean
+  onSelect: (id: number) => void
+  onDeleted: () => void
+}
+
+function SessionRow({ session, isActive, onSelect, onDeleted }: SessionRowProps) {
+  return (
+    // Using a div with role="button" instead of <button> because we need to nest
+    // interactive elements (SessionActions) inside the row. Nested <button> elements
+    // are invalid HTML and cause browser quirks. The div carries keyboard navigation
+    // via onKeyDown so it remains accessible.
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(session.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect(session.id)
+        }
+      }}
+      className={cn(
+        'group flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+        'hover:bg-sidebar-accent cursor-pointer',
+        isActive && 'bg-sidebar-accent',
+      )}
+    >
+      <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1 truncate font-medium text-sidebar-foreground">
+          {session.pinned && (
+            <Pin className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Pinned" />
+          )}
+          <span className="truncate">
+            {session.title ?? 'New conversation'}
+          </span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {formatDistanceToNow(new Date(session.created_at), { addSuffix: true })}
+        </div>
+      </div>
+
+      <SessionActions
+        session={session}
+        isActive={isActive}
+        onDeleted={onDeleted}
+      />
+    </div>
   )
 }

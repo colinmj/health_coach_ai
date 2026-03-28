@@ -172,10 +172,10 @@ export function MessageList() {
         >
           <div
             className={cn(
-              'max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+              'rounded-2xl px-4 py-3 text-sm leading-relaxed',
               msg.role === 'human'
-                ? 'bg-primary text-primary-foreground whitespace-pre-wrap'
-                : 'bg-muted text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none',
+                ? 'max-w-[80%] bg-primary text-primary-foreground whitespace-pre-wrap'
+                : 'w-full md:w-3/4 bg-muted text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none',
             )}
           >
             {msg.role === 'human' ? (
@@ -204,7 +204,7 @@ export function MessageList() {
         </div>
       ))}
 
-      {isStreaming && messages[messages.length - 1]?.role !== 'ai' && (
+      {isStreaming && (messages[messages.length - 1]?.role !== 'ai' || streamingTool !== null) && (
         <TypingIndicator tool={streamingTool} />
       )}
 

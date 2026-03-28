@@ -7,7 +7,7 @@ and fed back into create_react_agent as full history.
 
 import json
 
-from langchain_core.messages import messages_to_dict, messages_from_dict
+from langchain_core.messages import messages_to_dict, messages_from_dict, ToolMessage
 
 from db.schema import get_connection
 
@@ -23,6 +23,23 @@ def create_session(user_id: int, title: str) -> int:
         return row["id"]
 
 
+def _compress_history(messages: list, max_tool_chars: int = 1500) -> list:
+    """Replace oversized ToolMessage content with a truncated summary.
+
+    Keeps the first max_tool_chars of each ToolMessage so the agent
+    retains context about which tool was called and the shape of the result,
+    while avoiding the token bloat of replaying full JSON datasets.
+    """
+    compressed = []
+    for msg in messages:
+        if isinstance(msg, ToolMessage) and len(str(msg.content)) > max_tool_chars:
+            content = str(msg.content)
+            summary = content[:max_tool_chars] + f"\n[... {len(content) - max_tool_chars} chars truncated from history]"
+            msg = ToolMessage(content=summary, tool_call_id=msg.tool_call_id)
+        compressed.append(msg)
+    return compressed
+
+
 def load_messages(session_id: int) -> list:
     """Return all messages for a session as LangChain message objects, ordered oldest-first."""
     with get_connection() as conn:
@@ -32,7 +49,7 @@ def load_messages(session_id: int) -> list:
         ).fetchall()
     if not rows:
         return []
-    return messages_from_dict([json.loads(r["content"]) for r in rows])
+    return _compress_history(messages_from_dict([json.loads(r["content"]) for r in rows]))
 
 
 def append_messages(session_id: int, new_messages: list) -> None:

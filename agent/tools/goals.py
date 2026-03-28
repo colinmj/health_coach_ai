@@ -34,7 +34,7 @@ def create_goal(
     """
     user_id = get_request_user_id()
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
     today = datetime.date.today().isoformat()
 
     try:
@@ -112,7 +112,8 @@ def create_goal(
             "SELECT COUNT(*) AS n FROM goals WHERE user_id = %s AND status = 'active'",
             (user_id,),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            return "Failed to check active goal count. Please try again."
         active_count = row["n"]
         if active_count >= 3:
             return "You already have 3 active goals. Mark one as achieved or abandoned before adding a new one."
@@ -123,7 +124,8 @@ def create_goal(
             "VALUES (%s, %s, %s, %s, %s::jsonb, %s) RETURNING id",
             (user_id, goal_text, goal_text, title_val, json.dumps(parsed_domains), target_date_val),
         ).fetchone()
-        assert goal_row is not None
+        if goal_row is None:
+            return "Failed to create goal. Please try again."
         goal_id = goal_row["id"]
 
         if goal_type == "simple":
@@ -154,7 +156,8 @@ def create_goal(
                 "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s, %s) RETURNING id",
                 (user_id, goal_id, protocol_title, protocol_data["protocol_text"], today, protocol_data["review_date"]),
             ).fetchone()
-            assert protocol_row is not None
+            if protocol_row is None:
+                return "Failed to create protocol. Please try again."
             protocol_id = protocol_row["id"]
 
             inserted_actions = []
@@ -219,7 +222,8 @@ def save_insight(
             "FROM insights WHERE user_id = %s",
             (user_id,),
         ).fetchone()
-        assert counts is not None
+        if counts is None:
+            return "Failed to check insight count. Please try again."
 
         existing = conn.execute(
             "SELECT * FROM insights WHERE user_id = %s AND correlative_tool = %s AND status = 'active'",
@@ -242,7 +246,8 @@ def save_insight(
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (user_id, sid, correlative_tool, title_val, insight, effect, confidence, today),
             ).fetchone()
-            assert new_row is not None
+            if new_row is None:
+                return "Failed to save insight. Please try again."
             new_id = new_row["id"]
             conn.execute(
                 "UPDATE insights SET status = 'superseded', superseded_by = %s, updated_at = NOW() WHERE id = %s",
@@ -259,7 +264,8 @@ def save_insight(
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (user_id, sid, correlative_tool, title_val, insight, effect, confidence, today),
             ).fetchone()
-            assert new_row is not None
+            if new_row is None:
+                return "Failed to save insight. Please try again."
             new_id = new_row["id"]
             return json.dumps({"saved": True, "insight_id": new_id})
 

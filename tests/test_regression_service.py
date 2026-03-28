@@ -4,6 +4,10 @@ from services.regression_service import (
     generate_interpretation,
     run_regression,
 )
+from services.regression_service import (
+    generate_multi_interpretation,
+    run_multiple_regression,
+)
 
 
 # --- run_regression ---
@@ -137,3 +141,90 @@ def test_generate_interpretation_milli():
     interp = generate_interpretation("prior_night_hrv_milli", "performance_score", result)
     assert "1000ms" in interp
     assert "+40.00" in interp
+
+
+# --- run_multiple_regression ---
+
+def _make_rows(n=20):
+    """Make rows where y = 2*x1 + 3*x2 + noise."""
+    import random
+    random.seed(42)
+    rows = []
+    for i in range(n):
+        x1 = float(i)
+        x2 = float(i * 0.5 + random.uniform(-0.1, 0.1))
+        y = 2.0 * x1 + 3.0 * x2 + random.uniform(-0.5, 0.5)
+        rows.append({"x1": x1, "x2": x2, "y": y})
+    return rows
+
+
+def test_run_multiple_regression_high_r_squared():
+    rows = _make_rows(20)
+    result = run_multiple_regression(rows, ["x1", "x2"], "y")
+    assert "error" not in result
+    assert result["r_squared"] > 0.95
+    assert result["sample_size"] == 20
+    assert "x1" in result["coefficients"]
+    assert "x2" in result["coefficients"]
+    assert "x1" in result["standardized_coefficients"]
+
+
+def test_run_multiple_regression_insufficient_rows():
+    rows = _make_rows(8)
+    result = run_multiple_regression(rows, ["x1", "x2"], "y")
+    assert result["error"] == "insufficient_data"
+    assert result["min_required"] == 10
+
+
+def test_run_multiple_regression_too_many_predictors():
+    rows = _make_rows(10)
+    # 10 rows, 10 predictors → n <= p+1
+    x_cols = [f"x{i}" for i in range(10)]
+    for row in rows:
+        for col in x_cols:
+            row[col] = 1.0
+    result = run_multiple_regression(rows, x_cols, "y")
+    assert result["error"] == "insufficient_data_for_predictors"
+
+
+def test_run_multiple_regression_filters_nulls():
+    rows = _make_rows(20)
+    rows[0]["x1"] = None  # one row has a null predictor
+    result = run_multiple_regression(rows, ["x1", "x2"], "y")
+    assert "error" not in result
+    assert result["sample_size"] == 19
+
+
+def test_run_multiple_regression_p_values_present():
+    rows = _make_rows(20)
+    result = run_multiple_regression(rows, ["x1", "x2"], "y")
+    assert "p_values" in result
+    assert "x1" in result["p_values"]
+    assert "x2" in result["p_values"]
+    assert all(0.0 <= v <= 1.0 for v in result["p_values"].values())
+
+
+# --- generate_multi_interpretation ---
+
+def test_generate_multi_interpretation_contains_associated_with():
+    result = {
+        "standardized_coefficients": {"hrv": 0.5, "protein": 0.25},
+        "outcome": "performance_score",
+    }
+    interp = generate_multi_interpretation(result)
+    assert "associated with" in interp
+
+
+def test_generate_multi_interpretation_names_top_predictor():
+    result = {
+        "standardized_coefficients": {"hrv": 0.5, "protein": 0.25},
+        "outcome": "performance_score",
+    }
+    interp = generate_multi_interpretation(result)
+    assert "hrv" in interp
+
+
+def test_generate_multi_interpretation_error_input():
+    result = {"error": "insufficient_data"}
+    interp = generate_multi_interpretation(result)
+    assert "Insufficient" in interp

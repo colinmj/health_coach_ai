@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getAvailableIntegrations, createIntegrations, saveDataImports } from '@/lib/api'
+import { getAvailableIntegrations, createIntegrations, saveDataImports, getProfile, updateProfile } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,12 +47,20 @@ const DATA_TYPE_LABELS: Record<string, string> = {
   nutrition:         'Nutrition',
 }
 
+interface ProfileFormState {
+  name: string
+  date_of_birth: string
+  sex: string
+  height_cm: string
+  units: string
+}
+
 export function OnboardingPage() {
   const navigate = useNavigate()
   const completeOnboarding = useAuthStore((s) => s.completeOnboarding)
   const onboardingComplete = useAuthStore((s) => s.onboardingComplete)
 
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [integrations, setIntegrations] = useState<Integration[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [credentials, setCredentials] = useState<Record<string, string>>({})
@@ -61,19 +69,39 @@ export function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [profile, setProfile] = useState<ProfileFormState>({
+    name: '',
+    date_of_birth: '',
+    sex: '',
+    height_cm: '',
+    units: 'metric',
+  })
+
   useEffect(() => {
     if (onboardingComplete) {
       navigate('/', { replace: true })
       return
     }
-    getAvailableIntegrations()
-      .then((data) => setIntegrations(data as Integration[]))
-      .catch(() => setError('Failed to load integrations'))
+    Promise.all([
+      getAvailableIntegrations(),
+      getProfile(),
+    ])
+      .then(([integrationsData, profileData]) => {
+        setIntegrations(integrationsData as Integration[])
+        setProfile({
+          name: String(profileData.name ?? ''),
+          date_of_birth: String(profileData.date_of_birth ?? ''),
+          sex: String(profileData.sex ?? ''),
+          height_cm: profileData.height_cm != null ? String(profileData.height_cm) : '',
+          units: String(profileData.units ?? 'metric'),
+        })
+      })
+      .catch(() => setError('Failed to load data'))
       .finally(() => setLoading(false))
   }, [onboardingComplete, navigate])
 
   useEffect(() => {
-    if (step !== 2) return
+    if (step !== 3) return
     // Build map of data_type -> [sources that cover it and are selected]
     const typeToSources: Record<string, string[]> = {}
     for (const i of integrations.filter(i => selected.has(i.source))) {
@@ -89,6 +117,21 @@ export function OnboardingPage() {
     }
     setDataAssignments(prev => ({ ...auto, ...prev }))
   }, [step, integrations, selected])
+
+  async function handleProfileNext() {
+    const payload: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(profile)) {
+      if (v !== '') payload[k] = v
+    }
+    if (Object.keys(payload).length > 0) {
+      try {
+        await updateProfile(payload)
+      } catch {
+        // Non-fatal — profile save failure shouldn't block onboarding progress
+      }
+    }
+    setStep(2)
+  }
 
   function toggleSource(source: string) {
     setSelected((prev) => {
@@ -127,12 +170,94 @@ export function OnboardingPage() {
 
         {/* Step indicator */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className={cn('font-medium', step === 1 && 'text-foreground')}>1. Choose integrations</span>
+          <span className={cn('font-medium', step === 1 && 'text-foreground')}>1. Your profile</span>
           <span>→</span>
-          <span className={cn('font-medium', step === 2 && 'text-foreground')}>2. Setup notes</span>
+          <span className={cn('font-medium', step === 2 && 'text-foreground')}>2. Choose integrations</span>
+          <span>→</span>
+          <span className={cn('font-medium', step === 3 && 'text-foreground')}>3. Setup notes</span>
         </div>
 
         {step === 1 && (
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Your profile</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Tell us a bit about yourself so the agent can give you personalised insights.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-name">Name</Label>
+                <Input
+                  id="profile-name"
+                  value={profile.name}
+                  onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Your name"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-dob">Date of birth</Label>
+                <Input
+                  id="profile-dob"
+                  type="date"
+                  value={profile.date_of_birth}
+                  onChange={(e) => setProfile((prev) => ({ ...prev, date_of_birth: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-sex">Sex</Label>
+                <select
+                  id="profile-sex"
+                  value={profile.sex}
+                  onChange={(e) => setProfile((prev) => ({ ...prev, sex: e.target.value }))}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Not specified</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-height">
+                  Height ({profile.units === 'imperial' ? 'in' : 'cm'})
+                </Label>
+                <Input
+                  id="profile-height"
+                  type="number"
+                  value={profile.height_cm}
+                  onChange={(e) => setProfile((prev) => ({ ...prev, height_cm: e.target.value }))}
+                  placeholder={profile.units === 'imperial' ? 'e.g. 70' : 'e.g. 178'}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-units">Units</Label>
+                <select
+                  id="profile-units"
+                  value={profile.units}
+                  onChange={(e) => setProfile((prev) => ({ ...prev, units: e.target.value }))}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="metric">Metric (kg, cm)</option>
+                  <option value="imperial">Imperial (lbs, ft)</option>
+                </select>
+              </div>
+            </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            <div className="flex justify-end">
+              <Button onClick={handleProfileNext}>Next</Button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Connect your data</h1>
@@ -185,21 +310,24 @@ export function OnboardingPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex items-center justify-between">
-              <button
-                onClick={handleFinish}
-                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                disabled={submitting}
-              >
-                Skip for now
-              </button>
-              <Button onClick={() => selected.size > 0 ? setStep(2) : handleFinish()} disabled={submitting}>
-                {selected.size > 0 ? 'Next' : 'Continue without integrations'}
-              </Button>
+              <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleFinish}
+                  className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  disabled={submitting}
+                >
+                  Skip for now
+                </button>
+                <Button onClick={() => selected.size > 0 ? setStep(3) : handleFinish()} disabled={submitting}>
+                  {selected.size > 0 ? 'Next' : 'Continue without integrations'}
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Setup notes</h1>
@@ -277,7 +405,7 @@ export function OnboardingPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex items-center justify-between">
-              <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
+              <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
               <Button onClick={handleFinish} disabled={submitting}>
                 {submitting ? 'Saving…' : 'Go to Chat'}
               </Button>

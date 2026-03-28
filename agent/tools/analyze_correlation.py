@@ -2,6 +2,8 @@ import json
 
 from langchain_core.tools import tool
 
+from api.feature_gates import Feature, check_tool_feature
+from api.tool_confirmation import check_confirmation, fingerprint, record_invocation
 from services import regression_service
 
 
@@ -33,6 +35,12 @@ def analyze_correlation(rows_json: str, x_col: str, y_col: str) -> str:
     - get_nutrition_vs_body_composition: energy_kcal / fat_ratio
     - get_energy_balance_vs_weight:    rolling_7d_avg_balance / actual_7d_weight_change_kg
     """
+    if err := check_tool_feature(Feature.LINEAR_REGRESSION):
+        return err
+
+    input_hash = fingerprint(f"{rows_json}|{x_col}|{y_col}")
+    check_confirmation("linear_regression", input_hash)
+
     try:
         rows = json.loads(rows_json)
     except (json.JSONDecodeError, TypeError) as e:
@@ -51,10 +59,12 @@ def analyze_correlation(rows_json: str, x_col: str, y_col: str) -> str:
     confidence = regression_service.assess_insight_confidence(result)
     interpretation = regression_service.generate_interpretation(x_col, y_col, result)
 
-    return json.dumps({
+    output = json.dumps({
         "x": x_col,
         "y": y_col,
         **result,
         "insight_confidence": confidence,
         "interpretation": interpretation,
     })
+    record_invocation("linear_regression", input_hash, output)
+    return output

@@ -1,8 +1,11 @@
 
 import datetime
 import json as _json
+import logging
 from typing import AsyncGenerator
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from langchain_anthropic import ChatAnthropic
 
@@ -13,6 +16,7 @@ from agent.tools import build_tools
 from agent import sessions
 import analytics.goals as goals_analytics
 import analytics.trends as trends_analytics
+from api.tool_confirmation import ConfirmationRequired, get_pending_confirmation, set_confirmed
 from db.schema import get_request_user_id, set_current_user_id, get_connection
 
 load_dotenv()
@@ -123,16 +127,27 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
 
 async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
     """Make a single non-streaming LLM call to generate 2-3 follow-up questions."""
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0.7, timeout=None, stop=None)
+    llm = ChatAnthropic(model_name="claude-haiku-4-5-20251001", temperature=0.7, timeout=15, max_tokens=200)
     response = await llm.ainvoke([
         SystemMessage(content=(
             "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
             "the user might want to ask next. Output ONLY a JSON array of strings, nothing else. "
             'Example: ["How does this compare to last week?", "What should I focus on tomorrow?"]'
         )),
-        HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text}"),
+        HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text[:400]}"),
     ])
-    raw = response.content if isinstance(response.content, str) else ""
+    if isinstance(response.content, str):
+        raw = response.content
+    elif isinstance(response.content, list):
+        raw = " ".join(
+            b.get("text", "") for b in response.content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        raw = ""
+    raw = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+    if not raw:
+        return []
     questions = _json.loads(raw)
     if isinstance(questions, list):
         return [q for q in questions if isinstance(q, str)][:3]
@@ -157,6 +172,8 @@ individual activity sessions (strain, max/avg HR, calories burned, sport type)
 - **Body composition (Withings)**: weight (kg), fat ratio, muscle mass, fat-free mass, bone mass
 - **Nutrition (Cronometer)**: daily macros (carbs, protein, fat), calories, and micronutrients
 - **Bloodwork (lab upload)**: biomarker values with lab reference ranges and status (low/normal/high)
+- **Health knowledge base**: reference articles on lab interpretation, \
+biomarker reference ranges, and clinical guidelines (not user-specific data)
 
 ## Terminology — always use these terms consistently
 - **"strength session"** or **"lifting session"**: a workout logged in Hevy (barbell, dumbbell, \
@@ -209,16 +226,23 @@ pre-aggregated rows. Narrate the pattern; do not compute statistics yourself.
 an insight, call a correlation tool first, then follow up with analyze_correlation to \
 quantify the relationship statistically. Pass rows_json directly from the correlation \
 tool output. ALWAYS use "associated with" — NEVER "causes". Regression shows correlation only.
-7. Convert milliseconds to hours/minutes when presenting sleep durations.
-8. Report numbers to one decimal place unless asked for more.
-9. Always present measurements in the user's preferred units (see context block). \
+7. Use analyze_multi_correlation when the user asks which of several factors has the most impact on an outcome, or when you want to compare the relative importance of multiple predictors simultaneously. Pass x_cols_json as a JSON array string (e.g. '["hrv_milli", "protein_g"]'). The same "associated with, never causes" framing applies.
+8. Prefer get_performance_drivers over calling a correlation tool + analyze_multi_correlation \
+separately when the user asks what drives or affects their workout performance. It returns \
+the same regression analysis in a single tool call.
+9. Convert milliseconds to hours/minutes when presenting sleep durations.
+10. Report numbers to one decimal place unless asked for more.
+11. Always present measurements in the user's preferred units (see context block). \
 If units=imperial: convert weight kg→lbs (×2.205), distance km→miles (×0.621), \
 height cm→ft/in. If units=metric, present as-is. All data is stored in metric — \
 convert at presentation time only.
-10. If data is missing for a date, say so clearly.
-11. Lead with the direct answer, then supporting data. Keep responses concise.
-12. Never output raw JSON in your responses — always present data in plain language.
-13. For bloodwork questions, always include a recommendation to consult a doctor for clinical interpretation. Never diagnose or prescribe based on biomarker values.
+12. If data is missing for a date, say so clearly.
+13. Lead with the direct answer, then supporting data. Keep responses concise.
+14. Never output raw JSON in your responses — always present data in plain language.
+15. For bloodwork questions, always include a recommendation to consult a doctor for clinical interpretation. Never diagnose or prescribe based on biomarker values.
+16. When the user asks what a biomarker result means or what the normal range is, \
+call search_health_knowledge first, then combine with get_biomarkers if the user's \
+own values are also relevant.
 
 ## Goal setting
 
@@ -292,11 +316,11 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
 
     input_messages = history + [HumanMessage(content=query)]
-    result = agent.invoke({"messages": input_messages})
+    result = agent.invoke({"messages": input_messages}, config={"recursion_limit": 10})
 
     # Persist only the new messages produced this turn
     new_messages = result["messages"][len(history):]
@@ -315,7 +339,10 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
 
 
 async def astream_run(
-    query: str, session_id: int | None = None, user_id: int | None = None
+    query: str,
+    session_id: int | None = None,
+    user_id: int | None = None,
+    confirmed: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """Stream one agent turn, yielding event dicts.
 
@@ -330,6 +357,7 @@ async def astream_run(
     if user_id is None:
         user_id = get_request_user_id()  # reads ContextVar set by API or CLI __main__
     set_current_user_id(user_id)
+    set_confirmed(confirmed)
 
     if session_id is None:
         session_id = sessions.create_session(user_id, query)
@@ -340,7 +368,7 @@ async def astream_run(
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=None, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
     input_messages = history + [HumanMessage(content=query)]
 
@@ -350,9 +378,11 @@ async def astream_run(
     async for mode, data in agent.astream(
         {"messages": input_messages},
         stream_mode=["messages", "values"],
+        config={"recursion_limit": 10},
     ):
         if mode == "messages":
-            assert isinstance(data, tuple)
+            if not isinstance(data, tuple):
+                continue
             chunk, _metadata = data
             if isinstance(chunk, AIMessageChunk):
                 # Announce each tool call once, on the first chunk that carries its name
@@ -372,9 +402,15 @@ async def astream_run(
                                 yield {"type": "token", "text": text}
         elif mode == "values":
             final_state = data
+            # After a tool node completes, check if a confirmation is pending.
+            # check_confirmation() sets this ContextVar when a duplicate run is detected.
+            pending = get_pending_confirmation()
+            if pending is not None:
+                yield pending.to_event()
+                yield {"type": "done", "session_id": session_id}
+                return
 
-    if final_state:
-        assert isinstance(final_state, dict)
+    if final_state and isinstance(final_state, dict):
         new_messages = final_state["messages"][len(history):]
         sessions.append_messages(session_id, new_messages)
 
@@ -396,7 +432,7 @@ async def astream_run(
                 if questions:
                     yield {"type": "suggested_questions", "questions": questions}
         except Exception:
-            pass  # non-critical — never block the done event
+            logger.warning("Failed to generate follow-up questions", exc_info=True)
 
     yield {"type": "done", "session_id": session_id}
 

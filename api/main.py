@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import auth, chat, oauth, sessions, sync, goals, insights, integrations, profile
+from api.routers import stripe as stripe_router
+from api.routers import user as user_router
 
 load_dotenv()
 
@@ -25,6 +27,8 @@ app.include_router(goals.router)
 app.include_router(insights.router)
 app.include_router(integrations.router)
 app.include_router(profile.router)
+app.include_router(stripe_router.router)
+app.include_router(user_router.router)
 
 
 @app.get("/health")

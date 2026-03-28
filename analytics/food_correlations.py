@@ -1,3 +1,5 @@
+import datetime
+
 from db.schema import get_connection
 
 
@@ -19,6 +21,8 @@ def get_food_vs_performance(
         appearances_on_pr_days, appearances_on_non_pr_days,
         avg_protein_g, avg_carbs_g, avg_fat_g, avg_energy_kcal
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     date_conditions = []
     params: list = [user_id]
     if since is not None:
@@ -100,6 +104,8 @@ def get_food_vs_sleep(
         slow_wave_sleep_hours, rem_sleep_hours,
         energy_kcal, protein_g, carbs_g, fat_g, fiber_g
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["nf.user_id = %s", "sl.user_id = %s"]
     params: list = [user_id, user_id]
 
@@ -164,6 +170,8 @@ def get_food_vs_recovery(
         recovery_score, hrv_rmssd_milli, resting_heart_rate,
         energy_kcal, protein_g, carbs_g, fat_g, fiber_g
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["nf.user_id = %s", "r.user_id = %s", "r.score_state = 'SCORED'"]
     params: list = [user_id, user_id]
 
@@ -221,6 +229,8 @@ def get_food_vs_body_composition(
         weight_kg, fat_ratio, muscle_mass_kg,
         daily_energy_kcal, daily_protein_g, daily_carbs_g, daily_fat_g
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["nf.user_id = %s"]
     # params order matches SQL placeholder order:
     #   1. CTE: nutrition_foods subquery WHERE user_id = %s

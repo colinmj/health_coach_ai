@@ -1,3 +1,6 @@
+import io
+import zipfile
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
 from api.auth import get_current_user_id
@@ -109,8 +112,20 @@ async def upload_apple_health(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user_id),
 ) -> dict:
-    """Accept an Apple Health export.xml, upsert sleep/recovery/body/cardio data."""
+    """Accept an Apple Health export ZIP or raw export.xml, upsert sleep/recovery/body/cardio data."""
     content = await file.read()
+    if content[:2] == b'PK':  # ZIP magic bytes
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                xml_name = next(
+                    (n for n in zf.namelist() if n.endswith('export.xml')), None
+                )
+                if xml_name is None:
+                    raise HTTPException(status_code=422, detail="No export.xml found in ZIP")
+                with zf.open(xml_name) as xml_file:
+                    content = xml_file.read()
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=422, detail="Invalid ZIP file")
     try:
         with get_connection() as conn:
             counts = sync_apple_health_xml(content, user_id, conn)

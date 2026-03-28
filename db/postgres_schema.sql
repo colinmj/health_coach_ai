@@ -33,6 +33,15 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS weight_kg     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS fat_ratio     REAL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS units         TEXT NOT NULL DEFAULT 'metric' CHECK (units IN ('metric', 'imperial'));
 
+-- Migrate: add tier + Stripe subscription columns
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tier                   TEXT NOT NULL DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id     TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status    TEXT DEFAULT 'none';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at   TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id);
+
 -- One row per (user, source). Stores OAuth tokens and tracks sync state.
 CREATE TABLE IF NOT EXISTS user_integrations (
     id               SERIAL      PRIMARY KEY,
@@ -480,6 +489,8 @@ CREATE TABLE IF NOT EXISTS action_compliance (
 
 -- Health data — all queries are per-user and date-ranged
 CREATE INDEX IF NOT EXISTS idx_hevy_workouts_user_start    ON hevy_workouts      (user_id, start_time);
+CREATE INDEX IF NOT EXISTS idx_hevy_exercises_workout      ON hevy_exercises     (workout_id);
+CREATE INDEX IF NOT EXISTS idx_hevy_sets_exercise          ON hevy_sets          (exercise_id);
 CREATE INDEX IF NOT EXISTS idx_recovery_user_date          ON recovery           (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_sleep_user_date             ON sleep              (user_id, date);
 CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements  (user_id, date);
@@ -534,6 +545,10 @@ CREATE INDEX IF NOT EXISTS idx_actions_goal_id ON actions (goal_id);
 
 -- Migrate: add human-readable title to protocols
 ALTER TABLE protocols ADD COLUMN IF NOT EXISTS title TEXT;
+
+-- Migrate: session management columns
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_sessions_user_pinned ON sessions (user_id, pinned, updated_at DESC);
 
 -- Migrate: add short title to goals and insights
 ALTER TABLE goals    ADD COLUMN IF NOT EXISTS title TEXT;
@@ -631,6 +646,26 @@ WHERE rn = 1
 ORDER BY exercise_template_id, start_time;
 
 
+-- -----------------------------------------------------------------------------
+-- Knowledge base — document chunks for full-text search (RAG)
+-- Global documents have NULL user_id (shared). Per-user docs have a user_id FK.
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id            SERIAL       PRIMARY KEY,
+    user_id       INTEGER      REFERENCES users(id) ON DELETE CASCADE,
+    document_name TEXT         NOT NULL,
+    source_url    TEXT,
+    chunk_index   INTEGER      NOT NULL,
+    content       TEXT         NOT NULL,
+    tsv           TSVECTOR     GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    UNIQUE (document_name, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_tsv ON document_chunks USING GIN (tsv);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_doc_name ON document_chunks (document_name);
+
+
 CREATE OR REPLACE VIEW v_workout_performance AS
 SELECT
     w.user_id,
@@ -661,3 +696,32 @@ JOIN hevy_sets      s ON s.exercise_id = e.id
 WHERE (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
 GROUP BY w.id
 ORDER BY w.start_time DESC;
+
+
+-- -----------------------------------------------------------------------------
+-- Token & tool usage tracking
+-- -----------------------------------------------------------------------------
+
+-- Monthly token consumption per user (aggregated across all queries)
+CREATE TABLE IF NOT EXISTS token_usage (
+    user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    period      TEXT        NOT NULL,  -- 'YYYY-MM'
+    tokens_used INTEGER     NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, period)
+);
+
+-- Per-tool invocation tracking at daily granularity
+-- Stores last input hash + cached result for confirmation flow on re-runs
+CREATE TABLE IF NOT EXISTS tool_usage (
+    user_id          INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tool_name        TEXT        NOT NULL,
+    date             TEXT        NOT NULL,  -- 'YYYY-MM-DD'
+    month            TEXT        NOT NULL,  -- 'YYYY-MM'
+    invocations      INTEGER     NOT NULL DEFAULT 0,
+    tokens_used      INTEGER     NOT NULL DEFAULT 0,
+    last_input_hash  TEXT,                  -- 16-char SHA-256 prefix of normalised inputs
+    last_result      TEXT,                  -- JSON-serialised cached result for confirmation modal
+    last_invoked_at  TIMESTAMPTZ,
+    PRIMARY KEY (user_id, tool_name, date)
+);

@@ -1,7 +1,8 @@
 export interface Session {
   id: number
-  title: string
+  title: string | null
   summary: string | null
+  pinned: boolean
   created_at: string
 }
 
@@ -10,7 +11,22 @@ export interface Message {
   text: string
 }
 
-export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error' | 'suggested_questions'
+export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error' | 'suggested_questions' | 'confirm_required'
+
+export interface ConfirmStats {
+  last_run: string
+  daily_used: number
+  daily_limit: number | null
+}
+
+export interface ConfirmRequiredEvent {
+  type: 'confirm_required'
+  tool: string
+  title: string
+  body: string
+  stats: ConfirmStats
+  cached_result: string | null
+}
 
 export interface StreamEvent {
   type: StreamEventType
@@ -19,6 +35,12 @@ export interface StreamEvent {
   session_id?: number
   error?: string
   questions?: string[]
+  // confirm_required fields
+  tool?: string
+  title?: string
+  body?: string
+  stats?: ConfirmStats
+  cached_result?: string | null
 }
 
 export interface Action {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { SessionSidebar } from '@/components/chat/SessionSidebar'
 import { MessageList } from '@/components/chat/MessageList'
 import { ChatInput } from '@/components/chat/ChatInput'
+import { ConfirmModal } from '@/components/chat/ConfirmModal'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
 import { Menu } from 'lucide-react'
@@ -41,6 +42,7 @@ export function ChatPage() {
         <MessageList />
         <ChatInput />
       </main>
+      <ConfirmModal />
     </div>
   )
 }

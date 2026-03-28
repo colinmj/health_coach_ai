@@ -435,7 +435,7 @@ def _process_workouts(
                      strain, energy_kcal, avg_heart_rate, max_heart_rate,
                      zone_zero_milli, zone_one_milli, zone_two_milli,
                      zone_three_milli, zone_four_milli, zone_five_milli)
-                VALUES (%s, 'apple_health', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, 'apple_health', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (user_id, external_id, *values),
             )

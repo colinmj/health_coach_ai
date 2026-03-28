@@ -13,6 +13,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+docs/
+ClAUDE.md 
+COMMANDS.md
 
 # Claude
 .claude/
@@ -20,3 +23,6 @@ build/
 # Node / UI
 ui/node_modules/
 ui/dist/
+
+# Uploaded documents (PDFs, potentially large/sensitive)
+data/documents/

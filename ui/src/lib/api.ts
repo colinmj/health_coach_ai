@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { Message, Session, StreamEvent, SyncIntegration, Goal, Insight } from '@/types'
+import type { ConfirmRequiredEvent, Message, Session, StreamEvent, SyncIntegration, Goal, Insight } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 
 const BASE = '/api'
@@ -104,6 +104,24 @@ export async function getSessions(): Promise<Session[]> {
   return res.json()
 }
 
+export async function deleteSession(sessionId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/sessions/${sessionId}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 204) throw new Error('Failed to delete session')
+}
+
+export async function updateSession(
+  sessionId: number,
+  body: { title?: string | null; pinned?: boolean },
+): Promise<Session> {
+  const res = await apiFetch(`${BASE}/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error('Failed to update session')
+  return res.json()
+}
+
 export async function getMessages(sessionId: number): Promise<Message[]> {
   const res = await apiFetch(`${BASE}/sessions/${sessionId}/messages`)
   if (!res.ok) throw new Error('Failed to fetch messages')
@@ -130,6 +148,17 @@ export async function uploadCsvFile(file: File): Promise<UploadCsvResult> {
   const form = new FormData()
   form.append('file', file)
   const res = await apiFetch(`${BASE}/sync/upload-csv`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? 'Upload failed')
+  }
+  return res.json()
+}
+
+export async function uploadAppleHealthFile(file: File): Promise<{ rows_imported: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await apiFetch(`${BASE}/sync/upload-apple-health`, { method: 'POST', body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail ?? 'Upload failed')
@@ -167,27 +196,34 @@ export function streamChat(
     onDone: (sessionId: number) => void
     onError: (err: Error) => void
     onSuggestedQuestions: (questions: string[]) => void
+    onConfirmRequired?: (event: ConfirmRequiredEvent) => void
   },
   signal: AbortSignal,
+  confirmed = false,
 ) {
+  let doneReceived = false
+
   fetchEventSource(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ query, session_id: sessionId }),
+    body: JSON.stringify({ query, session_id: sessionId, confirmed }),
     signal,
     onmessage(ev) {
       const event: StreamEvent = JSON.parse(ev.data)
       if (event.type === 'token' && event.text) handlers.onToken(event.text)
       else if (event.type === 'tool_start' && event.name) handlers.onToolStart(event.name)
       else if (event.type === 'suggested_questions' && event.questions) handlers.onSuggestedQuestions(event.questions)
-      else if (event.type === 'done' && event.session_id != null) handlers.onDone(event.session_id)
+      else if (event.type === 'done' && event.session_id != null) { doneReceived = true; handlers.onDone(event.session_id) }
       else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
+      else if (event.type === 'confirm_required' && handlers.onConfirmRequired) {
+        handlers.onConfirmRequired(event as ConfirmRequiredEvent)
+      }
     },
     onclose() {
-      // Server closed the connection normally — no reconnect needed.
-      throw new Error('Stream closed')
+      if (!doneReceived) handlers.onError(new Error('Stream closed unexpectedly'))
     },
     onerror(err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err // intentional stop
       handlers.onError(err instanceof Error ? err : new Error('Stream failed'))
       throw err
     },
