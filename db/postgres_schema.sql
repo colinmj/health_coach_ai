@@ -40,6 +40,14 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status    TEXT DEFAULT 'none';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at   TIMESTAMPTZ;
 
+-- Migrate: add training IQ
+ALTER TABLE users ADD COLUMN IF NOT EXISTS training_iq TEXT
+    CHECK (training_iq IN ('beginner', 'novice', 'intermediate', 'advanced', 'elite'));
+
+-- Migrate: add health profile fields
+ALTER TABLE users ADD COLUMN IF NOT EXISTS injuries          TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS health_conditions TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id);
 
 -- One row per (user, source). Stores OAuth tokens and tracks sync state.
@@ -381,13 +389,19 @@ CREATE INDEX IF NOT EXISTS idx_strong_workouts_user ON strong_workouts (user_id,
 -- A conversation session. Title is either auto-generated from the first message
 -- or set by the user.
 CREATE TABLE IF NOT EXISTS sessions (
-    id         SERIAL      PRIMARY KEY,
-    user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title      TEXT,
-    summary    TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id           SERIAL      PRIMARY KEY,
+    user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title        TEXT,
+    summary      TEXT,
+    session_type TEXT        NOT NULL DEFAULT 'chat'
+                             CHECK (session_type IN ('chat', 'workout_builder')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migrate: add session_type if upgrading from older schema
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'chat'
+    CHECK (session_type IN ('chat', 'workout_builder'));
 
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary TEXT;
 
@@ -743,3 +757,52 @@ CREATE TABLE IF NOT EXISTS tool_usage (
     last_invoked_at  TIMESTAMPTZ,
     PRIMARY KEY (user_id, tool_name, date)
 );
+
+
+-- -----------------------------------------------------------------------------
+-- Workout Builder — training programs
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS training_programs (
+    id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                   INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version                   INTEGER     NOT NULL DEFAULT 1,
+    name                      TEXT        NOT NULL,
+    type                      TEXT        NOT NULL DEFAULT 'manual'
+                                          CHECK (type IN ('hevy', 'manual')),
+    goal_type                 TEXT        CHECK (goal_type IN ('cut', 'bulk', 'recomp', 'strength', 'athletic')),
+    training_iq_at_generation TEXT        CHECK (training_iq_at_generation IN ('beginner', 'novice', 'intermediate', 'advanced', 'elite')),
+    blocks                    JSONB       NOT NULL,
+    hevy_synced_at            TIMESTAMPTZ,
+    pdf_r2_key                TEXT,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_active                 BOOLEAN     NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_programs_user
+    ON training_programs (user_id, created_at DESC);
+
+-- Enforce at most one active program per user
+CREATE UNIQUE INDEX IF NOT EXISTS idx_training_programs_one_active
+    ON training_programs (user_id) WHERE (is_active = TRUE);
+
+
+-- -----------------------------------------------------------------------------
+-- Workout Builder — training blocks (Advanced / Elite users only)
+-- -----------------------------------------------------------------------------
+
+-- Date-bounded training periods. Workouts are NOT foreign-keyed here;
+-- block analysis queries workouts by date range instead.
+CREATE TABLE IF NOT EXISTS training_blocks (
+    id          SERIAL      PRIMARY KEY,
+    user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT        NOT NULL,
+    goal        TEXT        NOT NULL,  -- open text, e.g. "Build upper body hypertrophy base"
+    start_date  DATE        NOT NULL,
+    end_date    DATE,                  -- NULL = ongoing block
+    notes       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_blocks_user
+    ON training_blocks (user_id, start_date DESC);

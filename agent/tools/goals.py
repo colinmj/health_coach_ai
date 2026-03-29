@@ -419,3 +419,20 @@ def update_action(
         "target_value": float(result["target_value"]),
         "frequency": result["frequency"],
     })
+
+
+@tool
+def update_training_iq(level: str) -> str:
+    """Update the user's Training IQ level when their questions, language, or demonstrated
+    knowledge clearly suggests their understanding has meaningfully changed over multiple
+    interactions. Use sparingly — only change the level when you have consistent evidence,
+    not from a single question.
+    level must be one of: beginner, novice, intermediate, advanced, elite."""
+    valid = {"beginner", "novice", "intermediate", "advanced", "elite"}
+    if level not in valid:
+        return json.dumps({"error": f"Invalid level '{level}'. Must be one of: {', '.join(sorted(valid))}"})
+    user_id = get_request_user_id()
+    with get_connection() as conn:
+        conn.execute("UPDATE users SET training_iq = %s WHERE id = %s", (level, user_id))
+        conn.commit()
+    return json.dumps({"updated": True, "training_iq": level})

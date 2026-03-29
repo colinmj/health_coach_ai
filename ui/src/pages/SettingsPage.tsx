@@ -189,6 +189,33 @@ function ProfileTab() {
             <option value="imperial">Imperial (lbs, ft)</option>
           </select>
         </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="injuries">Injuries / movement restrictions</Label>
+          <textarea
+            id="injuries"
+            value={field('injuries')}
+            onChange={(e) => set('injuries', e.target.value)}
+            placeholder="e.g. Left knee ACL reconstruction (2022), avoid deep squats"
+            rows={3}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="health_conditions">Health conditions</Label>
+          <textarea
+            id="health_conditions"
+            value={field('health_conditions')}
+            onChange={(e) => set('health_conditions', e.target.value)}
+            placeholder="e.g. Type 2 diabetes, managed with metformin"
+            rows={3}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="text-xs text-muted-foreground">
+            Used by your AI coach to personalise programs. Never shared externally.
+          </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">

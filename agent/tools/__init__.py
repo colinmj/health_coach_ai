@@ -39,6 +39,7 @@ from agent.tools.goals import (
     update_goal_status,
     assess_protocol,
     update_action,
+    update_training_iq,
 )
 from agent.tools.analyze_correlation import analyze_correlation
 from agent.tools.analyze_multi_correlation import analyze_multi_correlation
@@ -102,6 +103,7 @@ TOOL_REGISTRY: list[tuple] = [
     (update_goal_status,                 set(),                         {}),
     (assess_protocol,                    set(),                         {}),
     (update_action,                      set(),                         {}),
+    (update_training_iq,                 set(),                         {}),
     (analyze_correlation,                set(),                         {}),
     (analyze_multi_correlation,          set(),                         {}),
     (get_biomarkers,                     {"bloodwork"},                 {}),

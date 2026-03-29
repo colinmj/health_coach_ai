@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from api.auth import get_current_user_id
 from db.schema import get_connection
@@ -11,12 +11,15 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 def get_profile(user_id: int = Depends(get_current_user_id)) -> dict:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, name, date_of_birth, sex, height_cm, units FROM users WHERE id = %s",
+            "SELECT email, name, date_of_birth, sex, height_cm, units, training_iq, injuries, health_conditions FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
     return dict(row)
+
+
+_VALID_TRAINING_IQ = {"beginner", "novice", "intermediate", "advanced", "elite"}
 
 
 class ProfileUpdate(BaseModel):
@@ -25,6 +28,16 @@ class ProfileUpdate(BaseModel):
     sex: str | None = None
     height_cm: float | None = None
     units: str | None = None
+    training_iq: str | None = None
+    injuries: str | None = None
+    health_conditions: str | None = None
+
+    @field_validator("training_iq")
+    @classmethod
+    def validate_training_iq(cls, v: str | None) -> str | None:
+        if v is not None and v not in _VALID_TRAINING_IQ:
+            raise ValueError(f"training_iq must be one of {sorted(_VALID_TRAINING_IQ)}")
+        return v
 
 
 @router.patch("/")

@@ -12,12 +12,12 @@ from langchain_core.messages import messages_to_dict, messages_from_dict, ToolMe
 from db.schema import get_connection
 
 
-def create_session(user_id: int, title: str) -> int:
+def create_session(user_id: int, title: str, session_type: str = "chat") -> int:
     """Create a new session and return its id. Title is truncated to 120 chars."""
     with get_connection() as conn:
         row = conn.execute(
-            "INSERT INTO sessions (user_id, title) VALUES (%s, %s) RETURNING id",
-            (user_id, title[:120]),
+            "INSERT INTO sessions (user_id, title, session_type) VALUES (%s, %s, %s) RETURNING id",
+            (user_id, title[:120], session_type),
         ).fetchone()
         assert row is not None
         return row["id"]
@@ -84,7 +84,7 @@ def get_recent_context(user_id: int, exclude_session_id: int | None = None) -> s
     """
     with get_connection() as conn:
         query = (
-            "SELECT id, title FROM sessions WHERE user_id = %s"
+            "SELECT id, title FROM sessions WHERE user_id = %s AND session_type = 'chat'"
             + (" AND id != %s" if exclude_session_id is not None else "")
             + " ORDER BY created_at DESC LIMIT 1"
         )

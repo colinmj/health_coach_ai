@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { ConfirmRequiredEvent, Message, Session, StreamEvent, SyncIntegration, Goal, Insight } from '@/types'
+import type { ConfirmRequiredEvent, Message, Session, StreamEvent, SyncIntegration, Goal, Insight, TrainingProgram, TrainingBlock } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 
 const BASE = '/api'
@@ -267,4 +267,68 @@ export function streamChat(
       throw err
     },
   })
+}
+
+// Workout Builder
+export function streamWorkoutBuilder(
+  query: string,
+  sessionId: number | null,
+  handlers: {
+    onToken: (token: string) => void
+    onToolStart: (name: string) => void
+    onDone: (sessionId: number) => void
+    onError: (err: Error) => void
+  },
+  signal: AbortSignal,
+) {
+  let doneReceived = false
+
+  fetchEventSource(`${BASE}/workout-builder/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ query, session_id: sessionId }),
+    signal,
+    onmessage(ev) {
+      const event: StreamEvent = JSON.parse(ev.data)
+      if (event.type === 'token' && event.text) handlers.onToken(event.text)
+      else if (event.type === 'tool_start' && event.name) handlers.onToolStart(event.name)
+      else if (event.type === 'done' && event.session_id != null) { doneReceived = true; handlers.onDone(event.session_id) }
+      else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
+    },
+    onclose() {
+      if (!doneReceived) handlers.onError(new Error('Stream closed unexpectedly'))
+    },
+    onerror(err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err
+      handlers.onError(err instanceof Error ? err : new Error('Stream failed'))
+      throw err
+    },
+  })
+}
+
+export async function getWorkoutPrograms(): Promise<TrainingProgram[]> {
+  const res = await apiFetch(`${BASE}/workout-builder/programs`)
+  if (!res.ok) throw new Error('Failed to fetch programs')
+  return res.json()
+}
+
+export async function getWorkoutProgram(id: string): Promise<TrainingProgram> {
+  const res = await apiFetch(`${BASE}/workout-builder/programs/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch program')
+  return res.json()
+}
+
+export async function syncProgramToHevy(programId: string): Promise<{ message: string }> {
+  const res = await apiFetch(`${BASE}/workout-builder/programs/${programId}/sync-to-hevy`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail ?? 'Hevy sync failed')
+  }
+  return res.json()
+}
+
+export async function getTrainingBlocks(): Promise<TrainingBlock[]> {
+  const res = await apiFetch(`${BASE}/workout-builder/blocks`)
+  if (!res.ok) throw new Error('Failed to fetch blocks')
+  return res.json()
 }

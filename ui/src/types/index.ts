@@ -99,3 +99,28 @@ export interface SyncIntegration {
   data_types: string[]
   label: string
 }
+
+export interface TrainingProgram {
+  id: string
+  name: string
+  type: 'hevy' | 'manual'
+  goal_type: string | null
+  training_iq_at_generation: string | null
+  version: number
+  is_active: boolean
+  hevy_synced_at: string | null
+  created_at: string
+  block_count: number
+  blocks?: unknown
+}
+
+export interface TrainingBlock {
+  id: number
+  name: string
+  goal: string
+  start_date: string
+  end_date: string | null
+  is_active: boolean
+  notes: string | null
+  created_at: string
+}

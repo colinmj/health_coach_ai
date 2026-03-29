@@ -76,7 +76,7 @@ def _fetch_user_profile(user_id: int) -> dict:
     """Return user profile fields used in system prompt construction."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT name, units, date_of_birth, sex, height_cm FROM users WHERE id = %s",
+            "SELECT name, units, date_of_birth, sex, height_cm, training_iq FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
     return dict(row) if row else {}
@@ -104,6 +104,7 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
         profile_lines.append(f"- Sex: {profile['sex']}")
     if profile.get("height_cm"):
         profile_lines.append(f"- Height: {profile['height_cm']} cm")
+    profile_lines.append(f"- Training IQ: {profile.get('training_iq') or 'not set'}")
 
     lines = ["## User profile\n" + "\n".join(profile_lines) + "\n"]
     lines.append("## Current goals, protocols & compliance\n")
