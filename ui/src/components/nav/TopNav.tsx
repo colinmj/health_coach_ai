@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 const NAV_LINKS = [
   { to: '/', label: 'Chat', end: true },
   { to: '/goals', label: 'Goals & Insights', end: false },
-  { to: '/form-check', label: 'Form Check', end: false },
+  { to: '/training', label: 'Training', end: false },
 ]
 
 function NavLinks({ onClick }: { onClick?: () => void }) {
