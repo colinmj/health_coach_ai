@@ -200,7 +200,7 @@ export function MessageList() {
               </Markdown>
             )}
           </div>
-          {msg.role === 'ai' && <MessageActions text={msg.text} />}
+          {msg.role === 'ai' && !isStreaming && <MessageActions text={msg.text} />}
         </div>
       ))}
 

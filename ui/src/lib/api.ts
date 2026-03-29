@@ -166,6 +166,45 @@ export async function uploadAppleHealthFile(file: File): Promise<{ rows_imported
   return res.json()
 }
 
+export interface FormFinding {
+  aspect: string
+  severity: 'ok' | 'warning' | 'error'
+  note: string
+}
+
+export interface FormAnalysisResult {
+  overall_rating: 'good' | 'needs_work' | 'safety_concern'
+  findings: FormFinding[]
+  cues: string[]
+  frame_count: number
+}
+
+export interface FormAnalysis extends FormAnalysisResult {
+  id: number
+  exercise_name: string
+  video_date: string
+  recovery_score_day_of: number | null
+  created_at: string
+}
+
+export async function uploadLiftingVideo(exerciseName: string, file: File): Promise<FormAnalysisResult> {
+  const form = new FormData()
+  form.append('exercise_name', exerciseName)
+  form.append('file', file)
+  const res = await apiFetch(`${BASE}/sync/upload-video`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? 'Analysis failed')
+  }
+  return res.json()
+}
+
+export async function getFormAnalyses(): Promise<FormAnalysis[]> {
+  const res = await apiFetch(`${BASE}/sync/form-analyses`)
+  if (!res.ok) throw new Error('Failed to fetch form analyses')
+  return res.json()
+}
+
 // Goals
 export async function getGoals(): Promise<Goal[]> {
   const res = await apiFetch(`${BASE}/goals/`)

@@ -16,3 +16,4 @@ numpy
 scikit-learn
 cryptography
 stripe>=8.0
+opencv-python

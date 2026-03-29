@@ -11,6 +11,7 @@ import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { FormCheckPage } from './pages/FormCheckPage'
 import { useAuthStore } from './stores/authStore'
 import './index.css'
 
@@ -47,6 +48,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/goals/:id" element={<GoalDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/form-check" element={<FormCheckPage />} />
               </Route>
               </Route>
             </Route>

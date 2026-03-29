@@ -702,6 +702,24 @@ ORDER BY w.start_time DESC;
 -- Token & tool usage tracking
 -- -----------------------------------------------------------------------------
 
+-- -----------------------------------------------------------------------------
+-- Form analysis
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS form_analyses (
+    id                    SERIAL       PRIMARY KEY,
+    user_id               INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    exercise_name         TEXT         NOT NULL,
+    video_date            DATE         NOT NULL DEFAULT CURRENT_DATE,
+    frame_count           INTEGER,
+    overall_rating        TEXT         CHECK (overall_rating IN ('good', 'needs_work', 'safety_concern')),
+    findings              JSONB,
+    cues                  JSONB,
+    recovery_score_day_of NUMERIC,
+    created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_form_analyses_user_id ON form_analyses (user_id);
+
 -- Monthly token consumption per user (aggregated across all queries)
 CREATE TABLE IF NOT EXISTS token_usage (
     user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,

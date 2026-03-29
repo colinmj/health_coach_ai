@@ -1,7 +1,7 @@
 import io
 import zipfile
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
 from api.auth import get_current_user_id
 from db.schema import get_connection
@@ -14,6 +14,7 @@ from sync.cronometer import auto_sync_csv
 from sync.strong import sync_strong_csv
 from sync.apple_health import sync_apple_health_xml
 from sync.bloodwork import extract_biomarkers, upsert_biomarkers
+from sync.form_analysis import SUPPORTED_EXERCISES, analyze_video, save_form_analysis
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -159,6 +160,49 @@ async def upload_bloodwork(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"biomarkers_imported": count}
+
+
+@router.post("/upload-video")
+async def upload_video(
+    exercise_name: str = Form(...),
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Accept a lifting video (MP4 or MOV), extract frames, analyse form via Claude vision,
+    and persist the result in form_analyses."""
+    if exercise_name not in SUPPORTED_EXERCISES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported exercise '{exercise_name}'. "
+                   f"Supported: {', '.join(sorted(SUPPORTED_EXERCISES))}",
+        )
+    content = await file.read()
+    try:
+        with get_connection() as conn:
+            result = analyze_video(content, exercise_name, conn)
+            save_form_analysis(result, user_id, exercise_name, conn)
+            conn.commit()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return result
+
+
+@router.get("/form-analyses")
+def list_form_analyses(user_id: int = Depends(get_current_user_id)) -> list[dict]:
+    """Return the 20 most recent form analyses for the current user."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, exercise_name, video_date, frame_count, overall_rating,
+                   findings, cues, recovery_score_day_of, created_at
+            FROM form_analyses
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 @router.get("/status")

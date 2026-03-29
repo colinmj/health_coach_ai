@@ -51,6 +51,7 @@ from agent.tools.food_correlations import (
 )
 from agent.tools.performance_drivers import get_performance_drivers
 from agent.tools.knowledge import search_health_knowledge
+from agent.tools.form_analysis import get_form_analyses
 
 def _cap_tool_output(result: str, max_rows: int = 150, max_chars: int = 6000) -> str:
     """Truncate large tool results to keep input tokens under control."""
@@ -110,6 +111,7 @@ TOOL_REGISTRY: list[tuple] = [
     (get_food_vs_body_composition,       {"nutrition", "body_composition"}, {}),
     (get_performance_drivers,            {"strength", "recovery"},          {"strength": "hevy"}),
     (search_health_knowledge,            set(),                             {}),
+    (get_form_analyses,                  set(),                             {}),
 ]
 
 
