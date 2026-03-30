@@ -74,3 +74,34 @@ def needs_sync(user_id: int, source: str) -> bool:
     if last is None:
         return True
     return datetime.now(timezone.utc) - last > timedelta(minutes=SYNC_THROTTLE_MINUTES)
+
+
+def epley_1rm(weight_kg: float | None, reps: int | None) -> float | None:
+    """Epley formula: weight × (1 + reps/30). Returns None if inputs missing."""
+    if not weight_kg or not reps:
+        return None
+    if reps == 1:
+        return round(weight_kg, 2)
+    return round(weight_kg * (1 + reps / 30), 2)
+
+
+def tag_performance(
+    current_1rm: float | None,
+    prev_best: float | None,
+    all_time_best: float | None,
+) -> str:
+    """Assign PR/Better/Neutral/Worse tag."""
+    if current_1rm is None:
+        return "Neutral"
+    if all_time_best is None:
+        return "PR"
+    if current_1rm > all_time_best:
+        return "PR"
+    if prev_best is None:
+        return "Neutral"
+    ratio = current_1rm / prev_best
+    if ratio > 1.025:
+        return "Better"
+    if ratio < 0.975:
+        return "Worse"
+    return "Neutral"

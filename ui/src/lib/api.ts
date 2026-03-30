@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { ConfirmRequiredEvent, Message, Session, StreamEvent, SyncIntegration, Goal, Insight, TrainingProgram, TrainingBlock } from '@/types'
+import type { ConfirmRequiredEvent, ManualWorkout, Message, ParsedWorkout, Session, StreamEvent, SyncIntegration, Goal, Insight, TrainingProgram, TrainingBlock } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 
 const BASE = '/api'
@@ -331,4 +331,47 @@ export async function getTrainingBlocks(): Promise<TrainingBlock[]> {
   const res = await apiFetch(`${BASE}/workout-builder/blocks`)
   if (!res.ok) throw new Error('Failed to fetch blocks')
   return res.json()
+}
+
+// Manual Workout
+export async function parseManualWorkout(
+  text: string | null,
+  file: File | null,
+): Promise<{ parsed: ParsedWorkout; warnings: string[] }> {
+  const form = new FormData()
+  if (text !== null) form.append('text', text)
+  if (file !== null) form.append('file', file)
+  // Do NOT set Content-Type manually — let the browser set the multipart boundary
+  const res = await apiFetch(`${BASE}/manual-workout/parse`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail ?? 'Parse failed')
+  }
+  return res.json()
+}
+
+export async function saveManualWorkout(
+  parsed: ParsedWorkout,
+): Promise<{ workout_id: number }> {
+  const res = await apiFetch(`${BASE}/manual-workout/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parsed }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail ?? 'Save failed')
+  }
+  return res.json()
+}
+
+export async function getManualWorkouts(): Promise<ManualWorkout[]> {
+  const res = await apiFetch(`${BASE}/manual-workout/`)
+  if (!res.ok) throw new Error('Failed to fetch manual workouts')
+  return res.json()
+}
+
+export async function deleteManualWorkout(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/manual-workout/${id}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 204) throw new Error('Failed to delete workout')
 }

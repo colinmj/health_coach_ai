@@ -124,3 +124,30 @@ export interface TrainingBlock {
   notes: string | null
   created_at: string
 }
+
+export interface ManualWorkoutSet {
+  set_index: number
+  set_type: string
+  weight_kg: number | null
+  reps: number | null
+  rpe: number | null
+}
+
+export interface ManualWorkoutExercise {
+  name: string
+  sets: ManualWorkoutSet[]
+}
+
+export interface ParsedWorkout {
+  title: string | null
+  date: string | null
+  exercises: ManualWorkoutExercise[]
+  warnings: string[]
+}
+
+export interface ManualWorkout {
+  id: number
+  title: string | null
+  start_time: string | null
+  logged_at: string
+}

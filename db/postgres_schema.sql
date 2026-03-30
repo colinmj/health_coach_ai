@@ -48,6 +48,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS training_iq TEXT
 ALTER TABLE users ADD COLUMN IF NOT EXISTS injuries          TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS health_conditions TEXT;
 
+-- Migrate: workout source preference
+ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_source TEXT
+    CHECK (workout_source IN ('hevy', 'manual'));
+
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id);
 
 -- One row per (user, source). Stores OAuth tokens and tracks sync state.
@@ -806,3 +810,82 @@ CREATE TABLE IF NOT EXISTS training_blocks (
 
 CREATE INDEX IF NOT EXISTS idx_training_blocks_user
     ON training_blocks (user_id, start_date DESC);
+
+
+-- -----------------------------------------------------------------------------
+-- Manual workout logging
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS manual_exercise_templates (
+    id         TEXT        PRIMARY KEY,
+    name       TEXT        NOT NULL,
+    category   TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS manual_workouts (
+    id         SERIAL      PRIMARY KEY,
+    user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      TEXT,
+    notes      TEXT,
+    start_time TIMESTAMPTZ,
+    logged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_manual_workouts_user ON manual_workouts (user_id, start_time DESC);
+
+CREATE TABLE IF NOT EXISTS manual_exercises (
+    id                   SERIAL  PRIMARY KEY,
+    workout_id           INTEGER NOT NULL REFERENCES manual_workouts(id) ON DELETE CASCADE,
+    exercise_template_id TEXT    REFERENCES manual_exercise_templates(id),
+    title                TEXT    NOT NULL,
+    notes                TEXT,
+    exercise_index       INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_manual_exercises_workout ON manual_exercises (workout_id);
+
+CREATE TABLE IF NOT EXISTS manual_sets (
+    id               SERIAL  PRIMARY KEY,
+    exercise_id      INTEGER NOT NULL REFERENCES manual_exercises(id) ON DELETE CASCADE,
+    set_index        INTEGER,
+    set_type         TEXT,
+    weight_kg        REAL,
+    reps             INTEGER,
+    rpe              REAL,
+    estimated_1rm    REAL,
+    performance_tag  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_manual_sets_exercise ON manual_sets (exercise_id);
+
+-- Seed common exercise templates (idempotent)
+INSERT INTO manual_exercise_templates (id, name, category) VALUES
+    ('barbell_bench_press',      'Barbell Bench Press',      'chest'),
+    ('barbell_squat',            'Barbell Squat',            'legs'),
+    ('deadlift',                 'Deadlift',                 'back'),
+    ('overhead_press',           'Overhead Press',           'shoulders'),
+    ('barbell_row',              'Barbell Row',              'back'),
+    ('pull_up',                  'Pull Up',                  'back'),
+    ('dip',                      'Dip',                      'chest'),
+    ('incline_bench_press',      'Incline Bench Press',      'chest'),
+    ('dumbbell_curl',            'Dumbbell Curl',            'biceps'),
+    ('tricep_pushdown',          'Tricep Pushdown',          'triceps'),
+    ('leg_press',                'Leg Press',                'legs'),
+    ('romanian_deadlift',        'Romanian Deadlift',        'legs'),
+    ('hip_thrust',               'Hip Thrust',               'legs'),
+    ('lateral_raise',            'Lateral Raise',            'shoulders'),
+    ('face_pull',                'Face Pull',                'shoulders'),
+    ('cable_row',                'Cable Row',                'back'),
+    ('lat_pulldown',             'Lat Pulldown',             'back'),
+    ('front_squat',              'Front Squat',              'legs'),
+    ('sumo_deadlift',            'Sumo Deadlift',            'legs'),
+    ('hack_squat',               'Hack Squat',               'legs'),
+    ('leg_curl',                 'Leg Curl',                 'legs'),
+    ('leg_extension',            'Leg Extension',            'legs'),
+    ('calf_raise',               'Calf Raise',               'legs'),
+    ('chest_fly',                'Chest Fly',                'chest'),
+    ('incline_dumbbell_press',   'Incline Dumbbell Press',   'chest'),
+    ('dumbbell_row',             'Dumbbell Row',             'back'),
+    ('arnold_press',             'Arnold Press',             'shoulders'),
+    ('hammer_curl',              'Hammer Curl',              'biceps'),
+    ('skull_crusher',            'Skull Crusher',            'triceps'),
+    ('close_grip_bench_press',   'Close Grip Bench Press',   'triceps')
+ON CONFLICT DO NOTHING;

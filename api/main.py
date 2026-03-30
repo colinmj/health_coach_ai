@@ -6,6 +6,7 @@ from api.routers import auth, chat, oauth, sessions, sync, goals, insights, inte
 from api.routers import stripe as stripe_router
 from api.routers import user as user_router
 from api.routers import workout_builder as workout_builder_router
+from api.routers import manual_workout as manual_workout_router
 
 load_dotenv()
 
@@ -31,6 +32,7 @@ app.include_router(profile.router)
 app.include_router(stripe_router.router)
 app.include_router(user_router.router)
 app.include_router(workout_builder_router.router)
+app.include_router(manual_workout_router.router)
 
 
 @app.get("/health")
