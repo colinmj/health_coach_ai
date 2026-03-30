@@ -23,9 +23,9 @@ function SetTable({ sets }: { sets: ManualWorkoutSet[] }) {
         </tr>
       </thead>
       <tbody className="divide-y">
-        {sets.map((s) => (
-          <tr key={s.set_index}>
-            <td className="py-1.5 pr-4 text-sm">{s.set_index + 1}</td>
+        {sets.map((s, i) => (
+          <tr key={i}>
+            <td className="py-1.5 pr-4 text-sm">{i + 1}</td>
             <td className="py-1.5 pr-4 text-sm">
               {s.weight_kg !== null ? `${s.weight_kg} kg` : '—'}
             </td>

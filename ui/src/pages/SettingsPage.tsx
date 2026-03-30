@@ -449,12 +449,23 @@ function IntegrationsTab() {
     queryFn: getDataImports,
   })
 
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: getProfile,
+  })
+
+  const workoutSourceMutation = useMutation({
+    mutationFn: (source: string) => updateProfile({ workout_source: source }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
+  })
+
   const [pendingAssignments, setPendingAssignments] = useState<Record<string, string>>({})
 
   const connectedMap = new Map((syncStatus as SyncIntegration[]).map((i) => [i.source, i]))
   const connected = syncStatus as SyncIntegration[]
 
   const assignments = { ...dataImports, ...pendingAssignments }
+  const workoutSource = (profile as Record<string, unknown> | undefined)?.workout_source ?? 'hevy'
 
   async function handleConnect(source: string, apiKey?: string) {
     await createIntegrations([source], apiKey ? { [source]: apiKey } : {})
@@ -501,6 +512,30 @@ function IntegrationsTab() {
           {routingSaved ? <><Check className="h-4 w-4 mr-1.5" />Saved</> : 'Save routing'}
         </Button>
       )}
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">Workout logging</h3>
+        <p className="text-xs text-muted-foreground">
+          Choose how you log workouts. Manual mode lets you log workouts directly in the app.
+        </p>
+        <div className="flex gap-2">
+          {(['hevy', 'manual'] as const).map((source) => (
+            <button
+              key={source}
+              onClick={() => workoutSourceMutation.mutate(source)}
+              disabled={workoutSourceMutation.isPending}
+              className={cn(
+                'rounded-md border px-4 py-1.5 text-sm transition-colors capitalize',
+                workoutSource === source
+                  ? 'bg-foreground text-background border-foreground'
+                  : 'text-muted-foreground hover:bg-muted',
+              )}
+            >
+              {source === 'hevy' ? 'Hevy' : 'Manual'}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

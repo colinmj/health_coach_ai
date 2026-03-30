@@ -19,24 +19,24 @@ from sync.utils import epley_1rm, tag_performance
 _PARSE_PROMPT = """You are a fitness data extractor. Extract the workout details from the provided text or image.
 
 Return ONLY a valid JSON object with this exact shape — no prose, no markdown fences:
-{
+{{
   "title": "<workout title or null>",
   "date": "<YYYY-MM-DD or today's date if not specified>",
   "exercises": [
-    {
+    {{
       "name": "<exercise name>",
       "sets": [
-        {
+        {{
           "reps": <integer or null>,
           "weight_kg": <float in kg or null>,
           "rpe": <float 1-10 or null>,
           "set_type": "normal"
-        }
+        }}
       ]
-    }
+    }}
   ],
   "warnings": ["<any ambiguities or assumptions made>"]
-}
+}}
 
 Rules:
 - Convert all weights to kilograms: 1 lb = 0.453592 kg
