@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import tempfile
+import time
 
 import anthropic
 
@@ -148,11 +149,19 @@ def analyze_video(file_bytes: bytes, exercise_name: str, conn) -> dict:
     content.append({"type": "text", "text": prompt_text})
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": content}],
-    )
+    _MAX_RETRIES = 3
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": content}],
+            )
+            break
+        except anthropic._exceptions.OverloadedError:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)  # 1 s, then 2 s, then raise
 
     raw = response.content[0].text.strip()
     if raw.startswith("```"):
@@ -177,13 +186,13 @@ def save_form_analysis(
     # Snapshot today's recovery score if available
     recovery_row = conn.execute(
         """
-        SELECT score FROM recovery
+        SELECT recovery_score FROM recovery
         WHERE user_id = %s AND date = CURRENT_DATE
         LIMIT 1
         """,
         (user_id,),
     ).fetchone()
-    recovery_score = float(recovery_row["score"]) if recovery_row else None
+    recovery_score = float(recovery_row["recovery_score"]) if recovery_row else None
 
     row = conn.execute(
         """

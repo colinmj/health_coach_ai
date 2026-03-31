@@ -48,6 +48,13 @@ npm run dev
 
 Vite proxies `/api/*` → `http://localhost:8000`, so both must be running.
 
+## RAG / Knowledge base
+```bash
+# Ingest a PDF or URL into the knowledge base
+python -m sync.documents path/to/file.pdf "Document Name"
+python -m sync.documents https://example.com/article "Document Name"
+```
+
 ## Agent
 ```bash
 # Interactive prompt

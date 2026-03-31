@@ -7,58 +7,133 @@ import {
   getManualWorkouts,
   deleteManualWorkout,
 } from '@/lib/api'
-import type { ManualWorkout, ManualWorkoutSet, ParsedWorkout } from '@/types'
+import type { ManualWorkout, ManualWorkoutSet, ManualWorkoutExercise, ParsedWorkout } from '@/types'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function SetTable({ sets }: { sets: ManualWorkoutSet[] }) {
-  return (
-    <table className="w-full text-left">
-      <thead>
-        <tr className="border-b">
-          <th className="pb-1 pr-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Set</th>
-          <th className="pb-1 pr-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Weight</th>
-          <th className="pb-1 pr-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Reps</th>
-          <th className="pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">RPE</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y">
-        {sets.map((s, i) => (
-          <tr key={i}>
-            <td className="py-1.5 pr-4 text-sm">{i + 1}</td>
-            <td className="py-1.5 pr-4 text-sm">
-              {s.weight_kg !== null ? `${s.weight_kg} kg` : '—'}
-            </td>
-            <td className="py-1.5 pr-4 text-sm">{s.reps !== null ? s.reps : '—'}</td>
-            <td className="py-1.5 text-sm">{s.rpe !== null ? s.rpe : '—'}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-function ParsedPreviewCard({
-  parsed,
+function EditableWorkoutCard({
+  initialParsed,
   saving,
   saved,
   onSave,
   onClear,
 }: {
-  parsed: ParsedWorkout
+  initialParsed: ParsedWorkout
   saving: boolean
   saved: boolean
-  onSave: () => void
+  onSave: (parsed: ParsedWorkout) => void
   onClear: () => void
 }) {
+  const [workout, setWorkout] = useState<ParsedWorkout>(() => ({
+    ...initialParsed,
+    exercises: initialParsed.exercises.map((ex) => ({
+      ...ex,
+      sets: ex.sets.map((s) => ({ ...s })),
+    })),
+  }))
+
+  function updateTitle(title: string) {
+    setWorkout((w) => ({ ...w, title }))
+  }
+
+  function updateDate(date: string) {
+    setWorkout((w) => ({ ...w, date }))
+  }
+
+  function updateExerciseName(exIdx: number, name: string) {
+    setWorkout((w) => ({
+      ...w,
+      exercises: w.exercises.map((ex, i) => (i === exIdx ? { ...ex, name } : ex)),
+    }))
+  }
+
+  function removeExercise(exIdx: number) {
+    setWorkout((w) => ({
+      ...w,
+      exercises: w.exercises.filter((_, i) => i !== exIdx),
+    }))
+  }
+
+  function addExercise() {
+    const newEx: ManualWorkoutExercise = {
+      name: '',
+      sets: [{ set_index: 0, set_type: 'normal', weight_kg: null, reps: null, rpe: null }],
+    }
+    setWorkout((w) => ({ ...w, exercises: [...w.exercises, newEx] }))
+  }
+
+  function updateSet(
+    exIdx: number,
+    setIdx: number,
+    field: 'weight_kg' | 'reps' | 'rpe',
+    raw: string,
+  ) {
+    const value = raw === '' ? null : Number(raw)
+    setWorkout((w) => ({
+      ...w,
+      exercises: w.exercises.map((ex, i) => {
+        if (i !== exIdx) return ex
+        return {
+          ...ex,
+          sets: ex.sets.map((s, j) => (j === setIdx ? { ...s, [field]: value } : s)),
+        }
+      }),
+    }))
+  }
+
+  function addSet(exIdx: number) {
+    setWorkout((w) => ({
+      ...w,
+      exercises: w.exercises.map((ex, i) => {
+        if (i !== exIdx) return ex
+        const last = ex.sets[ex.sets.length - 1]
+        const newSet: ManualWorkoutSet = {
+          set_index: ex.sets.length,
+          set_type: last?.set_type ?? 'normal',
+          weight_kg: last?.weight_kg ?? null,
+          reps: last?.reps ?? null,
+          rpe: null,
+        }
+        return { ...ex, sets: [...ex.sets, newSet] }
+      }),
+    }))
+  }
+
+  function removeSet(exIdx: number, setIdx: number) {
+    setWorkout((w) => ({
+      ...w,
+      exercises: w.exercises.map((ex, i) => {
+        if (i !== exIdx) return ex
+        return {
+          ...ex,
+          sets: ex.sets
+            .filter((_, j) => j !== setIdx)
+            .map((s, j) => ({ ...s, set_index: j })),
+        }
+      }),
+    }))
+  }
+
+  const inputCls =
+    'bg-transparent border-b border-border focus:outline-none focus:border-ring text-sm w-full'
+
   return (
     <div className="rounded-lg border bg-card p-4 space-y-4">
+      {/* Title + date */}
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-semibold text-sm">{parsed.title ?? 'Untitled workout'}</p>
-          {parsed.date && (
-            <p className="text-xs text-muted-foreground mt-0.5">{parsed.date}</p>
-          )}
+        <div className="flex-1 space-y-1.5">
+          <input
+            value={workout.title ?? ''}
+            onChange={(e) => updateTitle(e.target.value)}
+            placeholder="Workout title"
+            className="font-semibold text-sm bg-transparent border-b border-border focus:outline-none focus:border-ring w-full"
+          />
+          <input
+            type="date"
+            value={workout.date ?? ''}
+            onChange={(e) => updateDate(e.target.value)}
+            className="text-xs text-muted-foreground bg-transparent border-b border-border focus:outline-none focus:border-ring"
+          />
         </div>
         <button
           onClick={onClear}
@@ -68,9 +143,10 @@ function ParsedPreviewCard({
         </button>
       </div>
 
-      {parsed.warnings.length > 0 && (
+      {/* Warnings */}
+      {workout.warnings.length > 0 && (
         <div className="space-y-1">
-          {parsed.warnings.map((w, i) => (
+          {workout.warnings.map((w, i) => (
             <p key={i} className="text-sm text-amber-600 dark:text-amber-400">
               ⚠️ {w}
             </p>
@@ -78,23 +154,115 @@ function ParsedPreviewCard({
         </div>
       )}
 
-      {parsed.exercises.length === 0 ? (
+      {/* Exercises */}
+      {workout.exercises.length === 0 ? (
         <p className="text-sm text-muted-foreground">No exercises detected.</p>
       ) : (
-        <div className="space-y-4">
-          {parsed.exercises.map((ex, i) => (
-            <div key={i}>
-              <p className="text-sm font-medium mb-2">{ex.name}</p>
-              <SetTable sets={ex.sets} />
+        <div className="space-y-5">
+          {workout.exercises.map((ex, exIdx) => (
+            <div key={exIdx} className="space-y-2">
+              {/* Exercise name row */}
+              <div className="flex items-center gap-2">
+                <input
+                  value={ex.name}
+                  onChange={(e) => updateExerciseName(exIdx, e.target.value)}
+                  placeholder="Exercise name"
+                  className="flex-1 text-sm font-medium bg-transparent border-b border-border focus:outline-none focus:border-ring"
+                />
+                <button
+                  onClick={() => removeExercise(exIdx)}
+                  aria-label="Remove exercise"
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              {/* Sets table */}
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b">
+                    <th className="pb-1 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Set</th>
+                    <th className="pb-1 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">kg</th>
+                    <th className="pb-1 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Reps</th>
+                    <th className="pb-1 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">RPE</th>
+                    <th className="pb-1" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {ex.sets.map((s, setIdx) => (
+                    <tr key={setIdx}>
+                      <td className="py-1.5 pr-3 text-sm">{setIdx + 1}</td>
+                      <td className="py-1.5 pr-3">
+                        <input
+                          type="number"
+                          value={s.weight_kg ?? ''}
+                          onChange={(e) => updateSet(exIdx, setIdx, 'weight_kg', e.target.value)}
+                          placeholder="—"
+                          min="0"
+                          step="0.5"
+                          className={`${inputCls} w-16`}
+                        />
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <input
+                          type="number"
+                          value={s.reps ?? ''}
+                          onChange={(e) => updateSet(exIdx, setIdx, 'reps', e.target.value)}
+                          placeholder="—"
+                          min="0"
+                          step="1"
+                          className={`${inputCls} w-12`}
+                        />
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <input
+                          type="number"
+                          value={s.rpe ?? ''}
+                          onChange={(e) => updateSet(exIdx, setIdx, 'rpe', e.target.value)}
+                          placeholder="—"
+                          min="1"
+                          max="10"
+                          step="0.5"
+                          className={`${inputCls} w-12`}
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <button
+                          onClick={() => removeSet(exIdx, setIdx)}
+                          aria-label="Remove set"
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <button
+                onClick={() => addSet(exIdx)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                + Add set
+              </button>
             </div>
           ))}
         </div>
       )}
 
       <button
-        onClick={onSave}
+        onClick={addExercise}
+        className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        + Add exercise
+      </button>
+
+      <button
+        onClick={() => onSave(workout)}
         disabled={saving || saved}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60 hover:opacity-90"
+        className="block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60 hover:opacity-90"
       >
         {saved ? 'Saved!' : saving ? (
           <span className="flex items-center gap-2">
@@ -228,12 +396,11 @@ export function ManualWorkoutPage() {
     if (dropped) handlePhotoFile(dropped)
   }
 
-  async function handleSave() {
-    if (!parsed) return
+  async function handleSave(editedParsed: ParsedWorkout) {
     setSaving(true)
     setError(null)
     try {
-      await saveManualWorkout(parsed)
+      await saveManualWorkout(editedParsed)
       setSaved(true)
       queryClient.invalidateQueries({ queryKey: ['manual-workouts'] })
     } catch (err) {
@@ -366,10 +533,10 @@ export function ManualWorkoutPage() {
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
       )}
 
-      {/* Parse result preview */}
+      {/* Parse result — editable before saving */}
       {parsed && (
-        <ParsedPreviewCard
-          parsed={parsed}
+        <EditableWorkoutCard
+          initialParsed={parsed}
           saving={saving}
           saved={saved}
           onSave={handleSave}

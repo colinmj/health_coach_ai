@@ -400,7 +400,7 @@ def save_training_program(
         "type": program_type,
         "goal_type": goal_type,
         "training_iq_at_generation": iq,
-        "created_at": row["created_at"].isoformat(),
+        "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
         "message": "Program saved and set as active.",
     })
 

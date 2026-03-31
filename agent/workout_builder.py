@@ -224,7 +224,7 @@ async def astream_run(
 
         prompt = WORKOUT_BUILDER_SYSTEM_PROMPT.format(today=today)
 
-        llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
+        llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None, max_retries=5)
         agent = create_react_agent(llm, build_workout_builder_tools(), prompt=prompt)
         input_messages = history + [HumanMessage(content=query)]
 

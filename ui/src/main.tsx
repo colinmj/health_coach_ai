@@ -21,7 +21,9 @@ import { TrainingLayout } from './layouts/TrainingLayout'
 import { useAuthStore } from './stores/authStore'
 import './index.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { refetchOnWindowFocus: false } },
+})
 
 function RequireAuth() {
   const token = useAuthStore((s) => s.token)

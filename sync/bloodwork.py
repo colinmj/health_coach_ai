@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import time
 
 import anthropic
 
@@ -126,7 +127,15 @@ def extract_biomarkers(file_bytes: bytes, content_type: str) -> list[dict]:
     if betas:
         kwargs["betas"] = betas
 
-    response = client.beta.messages.create(**kwargs) if betas else client.messages.create(**kwargs)
+    _MAX_RETRIES = 3
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.beta.messages.create(**kwargs) if betas else client.messages.create(**kwargs)
+            break
+        except anthropic._exceptions.OverloadedError:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)  # 1s, then 2s, then raise
 
     raw = response.content[0].text.strip()
     # Strip accidental markdown fences

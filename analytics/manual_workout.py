@@ -60,6 +60,101 @@ def get_exercise_prs(user_id: int, exercise_template_id: str | None = None) -> l
     return [dict(row) for row in rows]
 
 
+def get_1rm_history(
+    user_id: int,
+    exercise_template_id: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Best 1RM per exercise per session for manual workouts.
+
+    Each dict has: workout_title, workout_date, exercise_template_id,
+    exercise_title, session_best_1rm_kg, best_set_weight_kg, best_set_reps.
+    """
+    conditions = ["w.user_id = %s"]
+    params: list = [user_id]
+    if exercise_template_id is not None:
+        conditions.append("e.exercise_template_id = %s")
+        params.append(exercise_template_id)
+    if since is not None:
+        conditions.append("w.start_time::date >= %s")
+        params.append(since)
+    if until is not None:
+        conditions.append("w.start_time::date <= %s")
+        params.append(until)
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            w.title                                          AS workout_title,
+            w.start_time::date                               AS workout_date,
+            e.exercise_template_id,
+            e.title                                          AS exercise_title,
+            ROUND(MAX(s.estimated_1rm)::numeric, 2)          AS session_best_1rm_kg,
+            s.weight_kg                                      AS best_set_weight_kg,
+            s.reps                                           AS best_set_reps
+        FROM manual_workouts  w
+        JOIN manual_exercises e ON e.workout_id  = w.id
+        JOIN manual_sets      s ON s.exercise_id = e.id
+        WHERE {where}
+        GROUP BY w.title, workout_date, e.exercise_template_id, e.title,
+                 s.weight_kg, s.reps
+        ORDER BY workout_date, e.title
+    """  # noqa: S608
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_workout_performance(
+    user_id: int,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Per-session PR/Better/Neutral/Worse breakdown for manual workouts.
+
+    Each dict has: workout_title, workout_date, total_sets, pr_sets,
+    better_sets, neutral_sets, worse_sets, performance_score, best_tag.
+    """
+    conditions = ["w.user_id = %s"]
+    params: list = [user_id]
+    if since is not None:
+        conditions.append("w.start_time::date >= %s")
+        params.append(since)
+    if until is not None:
+        conditions.append("w.start_time::date <= %s")
+        params.append(until)
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            w.title                                          AS workout_title,
+            w.start_time::date                               AS workout_date,
+            COUNT(*)                                         AS total_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'PR')      AS pr_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Better')  AS better_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Neutral') AS neutral_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Worse')   AS worse_sets,
+            ROUND(AVG(CASE s.performance_tag
+                WHEN 'PR'      THEN 3
+                WHEN 'Better'  THEN 2
+                WHEN 'Neutral' THEN 1
+                WHEN 'Worse'   THEN 0
+                ELSE NULL END)::numeric, 2)                  AS performance_score,
+            MODE() WITHIN GROUP (ORDER BY s.performance_tag) AS best_tag
+        FROM manual_workouts  w
+        JOIN manual_exercises e ON e.workout_id  = w.id
+        JOIN manual_sets      s ON s.exercise_id = e.id
+        WHERE {where}
+          AND (s.set_type IS NULL OR s.set_type NOT IN ('warmup', 'dropset'))
+        GROUP BY w.id, w.title, workout_date
+        ORDER BY workout_date DESC
+    """  # noqa: S608
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_recent_workouts_summary(user_id: int, weeks: int = 12) -> list[dict]:
     """Recent workout summary for agent context, covering the last N weeks.
 

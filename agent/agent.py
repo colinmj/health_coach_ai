@@ -1,12 +1,16 @@
 
+import asyncio
 import datetime
 import json as _json
 import logging
 from typing import AsyncGenerator
 from dotenv import load_dotenv
 
+import anthropic
+
 logger = logging.getLogger(__name__)
 
+from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from langchain_anthropic import ChatAnthropic
 
 from langchain_core.messages import HumanMessage, AIMessageChunk, SystemMessage
@@ -76,7 +80,7 @@ def _fetch_user_profile(user_id: int) -> dict:
     """Return user profile fields used in system prompt construction."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT name, units, date_of_birth, sex, height_cm, training_iq FROM users WHERE id = %s",
+            "SELECT name, units, date_of_birth, sex, height_cm, training_iq, workout_source FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
     return dict(row) if row else {}
@@ -105,6 +109,8 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
     if profile.get("height_cm"):
         profile_lines.append(f"- Height: {profile['height_cm']} cm")
     profile_lines.append(f"- Training IQ: {profile.get('training_iq') or 'not set'}")
+    workout_source = profile.get("workout_source") or "hevy"
+    profile_lines.append(f"- Workout logging: {workout_source}")
 
     lines = ["## User profile\n" + "\n".join(profile_lines) + "\n"]
     lines.append("## Current goals, protocols & compliance\n")
@@ -128,31 +134,40 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
 
 async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
     """Make a single non-streaming LLM call to generate 2-3 follow-up questions."""
-    llm = ChatAnthropic(model_name="claude-haiku-4-5-20251001", temperature=0.7, timeout=15, max_tokens=200)
-    response = await llm.ainvoke([
-        SystemMessage(content=(
-            "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
-            "the user might want to ask next. Output ONLY a JSON array of strings, nothing else. "
-            'Example: ["How does this compare to last week?", "What should I focus on tomorrow?"]'
-        )),
-        HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text[:400]}"),
-    ])
-    if isinstance(response.content, str):
-        raw = response.content
-    elif isinstance(response.content, list):
-        raw = " ".join(
-            b.get("text", "") for b in response.content
-            if isinstance(b, dict) and b.get("type") == "text"
+    try:
+        llm = ChatAnthropic(
+            model_name="claude-haiku-4-5-20251001", temperature=0.7, timeout=15, max_tokens=200
+        ).with_retry(
+            retry_if_exception_type=(AnthropicOverloadedError,),
+            stop_after_attempt=3,
+            wait_exponential_jitter=True,
         )
-    else:
-        raw = ""
-    raw = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-    if not raw:
+        response = await llm.ainvoke([
+            SystemMessage(content=(
+                "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
+                "the user might want to ask next. Output ONLY a JSON array of strings, nothing else. "
+                'Example: ["How does this compare to last week?", "What should I focus on tomorrow?"]'
+            )),
+            HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text[:400]}"),
+        ])
+        if isinstance(response.content, str):
+            raw = response.content
+        elif isinstance(response.content, list):
+            raw = " ".join(
+                b.get("text", "") for b in response.content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            raw = ""
+        raw = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        if not raw:
+            return []
+        questions = _json.loads(raw)
+        if isinstance(questions, list):
+            return [q for q in questions if isinstance(q, str)][:3]
         return []
-    questions = _json.loads(raw)
-    if isinstance(questions, list):
-        return [q for q in questions if isinstance(q, str)][:3]
-    return []
+    except Exception:
+        return []
 
 
 SYSTEM_PROMPT = """\
@@ -165,8 +180,9 @@ Today's date is {today}.
 When the user's name is provided in the context above, address them by their first name naturally — not on every message, but as a coach would with a regular client.
 
 ## Data sources
-- **Strength training (Hevy)**: lifting sessions, per-exercise 1RM history, performance tags \
-(PR / Better / Neutral / Worse / performance_score 0–3)
+- **Strength training**: lifting sessions, per-exercise 1RM history, performance tags \
+(PR / Better / Neutral / Worse / performance_score 0–3). The user's workout logging source \
+is shown in their profile above — use that to determine whether data comes from Hevy or manual logging.
 - **Recovery & sleep (Whoop)**: daily recovery score (0–100), HRV (rmssd ms), resting \
 heart rate, SpO2; sleep performance %, efficiency %, REM and slow-wave duration; \
 individual activity sessions (strain, max/avg HR, calories burned, sport type)
@@ -176,21 +192,28 @@ individual activity sessions (strain, max/avg HR, calories burned, sport type)
 - **Health knowledge base**: reference articles on lab interpretation, \
 biomarker reference ranges, and clinical guidelines (not user-specific data)
 
+## Workout logging source
+The user's profile above shows "Workout logging: hevy" or "Workout logging: manual". \
+This is the ONLY source of strength/workout data — do NOT try to check the other source. \
+- If **hevy**: workouts come from Hevy. Use the strength tools normally.
+- If **manual**: workouts are logged manually in this app. Use the same strength tools — \
+they automatically return manual workout data. Do NOT refer to Hevy for workout data.
+
 ## Terminology — always use these terms consistently
-- **"strength session"** or **"lifting session"**: a workout logged in Hevy (barbell, dumbbell, \
-machine work). Performance here means PR/Better/Neutral/Worse tags based on estimated 1RM.
+- **"strength session"** or **"lifting session"**: a workout (barbell, dumbbell, machine work). \
+Performance means PR/Better/Neutral/Worse tags based on estimated 1RM.
 - **"activity"** or **"Whoop activity"**: a session logged in Whoop (hockey, running, cycling, \
 strength training, etc.). Performance here means strain score and heart rate metrics.
-- **"performance score"**: always Hevy-specific (0–3 scale from PR tagging). Never use this \
+- **"performance score"**: always strength-training-specific (0–3 scale from PR tagging). Never use this \
 phrase for Whoop data.
-- **"strain"**: always Whoop-specific. Never use this phrase for Hevy data.
+- **"strain"**: always Whoop-specific. Never use this phrase for strength/workout data.
 - **"recovery"**: the Whoop daily recovery score (0–100). Not related to workout recovery time.
 
 ## Disambiguating "workout" and "performance"
-"Workout", "session", and "performance" are ambiguous — they could refer to a Hevy strength \
+"Workout", "session", and "performance" are ambiguous — they could refer to a strength \
 session OR a Whoop activity. You MUST resolve the ambiguity before calling any tool.
 
-Signals that mean **strength session (Hevy)**:
+Signals that mean **strength session**:
 - User names an exercise (e.g. "bench press", "squat", "deadlift")
 - User asks about "1RM", "reps", "sets", "PRs", "performance score"
 
@@ -199,8 +222,8 @@ Signals that mean **Whoop activity**:
 - User asks about "heart rate", "strain", "calories burned" during a session
 
 If none of the above signals are present, you MUST ask the user before calling any tool: \
-"Are you asking about your strength training (Hevy) or a sport/activity logged in Whoop \
-(e.g. powerlifting, kickboxing)?" Do NOT default to Hevy.
+"Are you asking about your strength training or a sport/activity logged in Whoop \
+(e.g. powerlifting, kickboxing)?" Do NOT default to either.
 
 ## Scope
 Your focus is health, fitness, nutrition, sleep, recovery, and athletic performance. This includes general questions, training programs, recipes, research, and anything else within that domain. You can and should engage with these topics even when they're not about the user's own data.
@@ -317,7 +340,7 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None, max_retries=5)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
 
     input_messages = history + [HumanMessage(content=query)]
@@ -369,47 +392,55 @@ async def astream_run(
     context = build_context_block(user_id, current_session_id=session_id)
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None, max_retries=5)
     agent = create_react_agent(llm, build_tools(), prompt=prompt)
     input_messages = history + [HumanMessage(content=query)]
 
     final_state = None
     announced: set[str] = set()  # track announced tool calls by chunk index
 
-    async for mode, data in agent.astream(
-        {"messages": input_messages},
-        stream_mode=["messages", "values"],
-        config={"recursion_limit": 10},
-    ):
-        if mode == "messages":
-            if not isinstance(data, tuple):
-                continue
-            chunk, _metadata = data
-            if isinstance(chunk, AIMessageChunk):
-                # Announce each tool call once, on the first chunk that carries its name
-                for tc in chunk.tool_call_chunks or []:
-                    key = str(tc.get("index", ""))
-                    if tc.get("name") and key not in announced:
-                        announced.add(key)
-                        yield {"type": "tool_start", "name": tc["name"]}
-                # Stream text tokens
-                if isinstance(chunk.content, str) and chunk.content:
-                    yield {"type": "token", "text": chunk.content}
-                elif isinstance(chunk.content, list):
-                    for block in chunk.content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text", "")
-                            if text:
-                                yield {"type": "token", "text": text}
-        elif mode == "values":
-            final_state = data
-            # After a tool node completes, check if a confirmation is pending.
-            # check_confirmation() sets this ContextVar when a duplicate run is detected.
-            pending = get_pending_confirmation()
-            if pending is not None:
-                yield pending.to_event()
-                yield {"type": "done", "session_id": session_id}
-                return
+    _MAX_RETRIES = 5
+    for _attempt in range(_MAX_RETRIES):
+        try:
+            async for mode, data in agent.astream(
+                {"messages": input_messages},
+                stream_mode=["messages", "values"],
+                config={"recursion_limit": 10},
+            ):
+                if mode == "messages":
+                    if not isinstance(data, tuple):
+                        continue
+                    chunk, _metadata = data
+                    if isinstance(chunk, AIMessageChunk):
+                        # Announce each tool call once, on the first chunk that carries its name
+                        for tc in chunk.tool_call_chunks or []:
+                            key = str(tc.get("index", ""))
+                            if tc.get("name") and key not in announced:
+                                announced.add(key)
+                                yield {"type": "tool_start", "name": tc["name"]}
+                        # Stream text tokens
+                        if isinstance(chunk.content, str) and chunk.content:
+                            yield {"type": "token", "text": chunk.content}
+                        elif isinstance(chunk.content, list):
+                            for block in chunk.content:
+                                if isinstance(block, dict) and block.get("type") == "text":
+                                    text = block.get("text", "")
+                                    if text:
+                                        yield {"type": "token", "text": text}
+                elif mode == "values":
+                    final_state = data
+                    # After a tool node completes, check if a confirmation is pending.
+                    # check_confirmation() sets this ContextVar when a duplicate run is detected.
+                    pending = get_pending_confirmation()
+                    if pending is not None:
+                        yield pending.to_event()
+                        yield {"type": "done", "session_id": session_id}
+                        return
+            break  # stream completed successfully
+        except Exception as exc:
+            if getattr(exc, 'status_code', None) != 529 or _attempt == _MAX_RETRIES - 1:
+                raise
+            await asyncio.sleep(2 ** _attempt)
 
     if final_state and isinstance(final_state, dict):
         new_messages = final_state["messages"][len(history):]

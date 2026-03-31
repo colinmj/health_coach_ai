@@ -100,6 +100,27 @@ export interface SyncIntegration {
   label: string
 }
 
+export interface ProgramExercise {
+  exercise_template_id?: string
+  exercise_title?: string
+  sets?: number | string
+  reps?: number | string
+  rest_seconds?: number
+  notes?: string
+}
+
+export interface ProgramSession {
+  day_label?: string
+  exercises?: ProgramExercise[]
+}
+
+export interface ProgramBlock {
+  name: string
+  duration_weeks?: number
+  days_per_week?: number
+  sessions?: ProgramSession[]
+}
+
 export interface TrainingProgram {
   id: string
   name: string
@@ -111,7 +132,7 @@ export interface TrainingProgram {
   hevy_synced_at: string | null
   created_at: string
   block_count: number
-  blocks?: unknown
+  blocks?: ProgramBlock[]
 }
 
 export interface TrainingBlock {

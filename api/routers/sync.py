@@ -1,6 +1,7 @@
 import io
 import zipfile
 
+import anthropic
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
 from api.auth import get_current_user_id
@@ -182,6 +183,11 @@ async def upload_video(
             result = analyze_video(content, exercise_name, conn)
             save_form_analysis(result, user_id, exercise_name, conn)
             conn.commit()
+    except anthropic._exceptions.OverloadedError:
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is temporarily overloaded. Please try again in a moment.",
+        )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return result

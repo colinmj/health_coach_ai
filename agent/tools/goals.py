@@ -2,6 +2,7 @@ import datetime
 import json
 import re
 
+from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
@@ -34,7 +35,11 @@ def create_goal(
     """
     user_id = get_request_user_id()
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None)
+    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None).with_retry(
+        retry_if_exception_type=(AnthropicOverloadedError,),
+        stop_after_attempt=3,
+        wait_exponential_jitter=True,
+    )
     today = datetime.date.today().isoformat()
 
     try:

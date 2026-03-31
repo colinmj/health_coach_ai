@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import time
 from datetime import date
 
 import anthropic
@@ -80,11 +81,19 @@ def parse_workout_input(
     content.append({"type": "text", "text": prompt_text})
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": content}],
-    )
+    _MAX_RETRIES = 3
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": content}],
+            )
+            break
+        except anthropic._exceptions.OverloadedError:
+            if attempt == _MAX_RETRIES - 1:
+                return {"exercises": [], "warnings": ["AI service is temporarily overloaded. Please try again."]}
+            time.sleep(2 ** attempt)
 
     raw = response.content[0].text.strip()
     if raw.startswith("```"):

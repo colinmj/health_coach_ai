@@ -241,6 +241,7 @@ export function streamChat(
   confirmed = false,
 ) {
   let doneReceived = false
+  let errorReceived = false
 
   fetchEventSource(`${BASE}/chat/stream`, {
     method: 'POST',
@@ -253,13 +254,13 @@ export function streamChat(
       else if (event.type === 'tool_start' && event.name) handlers.onToolStart(event.name)
       else if (event.type === 'suggested_questions' && event.questions) handlers.onSuggestedQuestions(event.questions)
       else if (event.type === 'done' && event.session_id != null) { doneReceived = true; handlers.onDone(event.session_id) }
-      else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
+      else if (event.type === 'error') { errorReceived = true; handlers.onError(new Error(event.error ?? 'Stream error')) }
       else if (event.type === 'confirm_required' && handlers.onConfirmRequired) {
         handlers.onConfirmRequired(event as ConfirmRequiredEvent)
       }
     },
     onclose() {
-      if (!doneReceived) handlers.onError(new Error('Stream closed unexpectedly'))
+      if (!doneReceived && !errorReceived) handlers.onError(new Error('Stream closed unexpectedly'))
     },
     onerror(err) {
       if (err instanceof Error && err.name === 'AbortError') throw err // intentional stop
@@ -282,6 +283,7 @@ export function streamWorkoutBuilder(
   signal: AbortSignal,
 ) {
   let doneReceived = false
+  let errorReceived = false
 
   fetchEventSource(`${BASE}/workout-builder/stream`, {
     method: 'POST',
@@ -293,10 +295,10 @@ export function streamWorkoutBuilder(
       if (event.type === 'token' && event.text) handlers.onToken(event.text)
       else if (event.type === 'tool_start' && event.name) handlers.onToolStart(event.name)
       else if (event.type === 'done' && event.session_id != null) { doneReceived = true; handlers.onDone(event.session_id) }
-      else if (event.type === 'error') handlers.onError(new Error(event.error ?? 'Stream error'))
+      else if (event.type === 'error') { errorReceived = true; handlers.onError(new Error(event.error ?? 'Stream error')) }
     },
     onclose() {
-      if (!doneReceived) handlers.onError(new Error('Stream closed unexpectedly'))
+      if (!doneReceived && !errorReceived) handlers.onError(new Error('Stream closed unexpectedly'))
     },
     onerror(err) {
       if (err instanceof Error && err.name === 'AbortError') throw err
