@@ -7,7 +7,10 @@ def get_hrv_vs_performance(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Pairs each workout's performance score with the prior night's recovery/HRV data."""
+    """Pairs each workout's performance score with the prior night's recovery/HRV data.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -43,7 +46,10 @@ def get_sleep_vs_performance(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """Pairs each workout's performance score with the prior night's sleep data (ms → minutes)."""
+    """Pairs each workout's performance score with the prior night's sleep data (ms → minutes).
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -88,6 +94,8 @@ def get_sleep_threshold_vs_performance(
     Returns two rows — one for each group — so the agent can narrate the difference
     without computing statistics itself.
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     threshold_milli = int(threshold_hours * 3_600_000)
     params: list = [threshold_milli]
     date_conditions = []
@@ -142,7 +150,10 @@ def get_body_composition_vs_strength(
     days_window: int = 7,
 ) -> list[dict]:
     """For each body measurement, finds the nearest workout within days_window days
-    and returns average 1RM across exercises in that workout."""
+    and returns average 1RM across exercises in that workout.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -281,7 +292,10 @@ def get_carbs_prior_to_prs(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
-    """For each PR workout, returns carb totals for the 3 days leading up to it."""
+    """For each PR workout, returns carb totals for the 3 days leading up to it.
+    Defaults to the last 60 days when no date range is provided."""
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = []
     params: list = []
     if since is not None:
@@ -293,34 +307,27 @@ def get_carbs_prior_to_prs(
 
     where = ("WHERE vp.best_tag = 'PR' AND " + " AND ".join(conditions)) if conditions else "WHERE vp.best_tag = 'PR'"
 
+    # Single range JOIN replaces three separate LEFT JOINs so the index on
+    # (user_id, date) is used once per PR workout instead of three sequential scans.
     sql = f"""
         SELECT
             vp.workout_date,
             vp.workout_title,
             vp.pr_sets,
-            n1.carbs_g        AS carbs_day_minus_1,
-            n1.net_carbs_g    AS net_carbs_day_minus_1,
-            n2.carbs_g        AS carbs_day_minus_2,
-            n2.net_carbs_g    AS net_carbs_day_minus_2,
-            n3.carbs_g        AS carbs_day_minus_3,
-            n3.net_carbs_g    AS net_carbs_day_minus_3,
-            ROUND(((COALESCE(n1.carbs_g, 0) + COALESCE(n2.carbs_g, 0) + COALESCE(n3.carbs_g, 0))
-                  / NULLIF(
-                      (CASE WHEN n1.carbs_g IS NOT NULL THEN 1 ELSE 0 END
-                     + CASE WHEN n2.carbs_g IS NOT NULL THEN 1 ELSE 0 END
-                     + CASE WHEN n3.carbs_g IS NOT NULL THEN 1 ELSE 0 END), 0
-                  ))::numeric, 1) AS avg_carbs_3d,
-            ROUND(((COALESCE(n1.net_carbs_g, 0) + COALESCE(n2.net_carbs_g, 0) + COALESCE(n3.net_carbs_g, 0))
-                  / NULLIF(
-                      (CASE WHEN n1.net_carbs_g IS NOT NULL THEN 1 ELSE 0 END
-                     + CASE WHEN n2.net_carbs_g IS NOT NULL THEN 1 ELSE 0 END
-                     + CASE WHEN n3.net_carbs_g IS NOT NULL THEN 1 ELSE 0 END), 0
-                  ))::numeric, 1) AS avg_net_carbs_3d
+            MAX(n.carbs_g)     FILTER (WHERE n.date = vp.workout_date - INTERVAL '1 day') AS carbs_day_minus_1,
+            MAX(n.net_carbs_g) FILTER (WHERE n.date = vp.workout_date - INTERVAL '1 day') AS net_carbs_day_minus_1,
+            MAX(n.carbs_g)     FILTER (WHERE n.date = vp.workout_date - INTERVAL '2 days') AS carbs_day_minus_2,
+            MAX(n.net_carbs_g) FILTER (WHERE n.date = vp.workout_date - INTERVAL '2 days') AS net_carbs_day_minus_2,
+            MAX(n.carbs_g)     FILTER (WHERE n.date = vp.workout_date - INTERVAL '3 days') AS carbs_day_minus_3,
+            MAX(n.net_carbs_g) FILTER (WHERE n.date = vp.workout_date - INTERVAL '3 days') AS net_carbs_day_minus_3,
+            ROUND((AVG(n.carbs_g))::numeric, 1)     AS avg_carbs_3d,
+            ROUND((AVG(n.net_carbs_g))::numeric, 1) AS avg_net_carbs_3d
         FROM v_workout_performance vp
-        LEFT JOIN nutrition_daily n1 ON n1.date = vp.workout_date - INTERVAL '1 day'
-        LEFT JOIN nutrition_daily n2 ON n2.date = vp.workout_date - INTERVAL '2 days'
-        LEFT JOIN nutrition_daily n3 ON n3.date = vp.workout_date - INTERVAL '3 days'
+        LEFT JOIN nutrition_daily n
+          ON n.date >= vp.workout_date - INTERVAL '3 days'
+         AND n.date < vp.workout_date
         {where}
+        GROUP BY vp.workout_date, vp.workout_title, vp.pr_sets
         ORDER BY vp.workout_date
     """
     with get_connection() as conn:
@@ -377,6 +384,8 @@ def get_nutrition_vs_activity(
     when I play hockey?'. sport_name is matched case-insensitively.
     Returns one row per activity session that has nutrition data for the prior day.
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["a.score_state = 'SCORED'"]
     params: list = []
     if sport_name is not None:
@@ -425,6 +434,8 @@ def get_activity_vs_strength(
     sport_name is matched case-insensitively. Leave None to include all sports.
     Returns one row per (workout, prior-day activity) pair.
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     conditions = ["a.score_state = 'SCORED'"]
     params: list = []
     if sport_name is not None:

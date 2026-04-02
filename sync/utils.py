@@ -94,7 +94,7 @@ def tag_performance(
     if current_1rm is None:
         return "Neutral"
     if all_time_best is None:
-        return "PR"
+        return "Baseline"  # First time ever logging this exercise
     if current_1rm > all_time_best:
         return "PR"
     if prev_best is None:

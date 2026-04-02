@@ -34,8 +34,8 @@ class TestEpley1rm:
 # ---------------------------------------------------------------------------
 
 class TestTagPerformance:
-    def test_no_prior_history_is_pr(self):
-        assert tag_performance(100.0, prev_best=None, all_time_best=None) == "PR"
+    def test_no_prior_history_is_baseline(self):
+        assert tag_performance(100.0, prev_best=None, all_time_best=None) == "Baseline"
 
     def test_beats_all_time_best_is_pr(self):
         assert tag_performance(110.0, prev_best=100.0, all_time_best=105.0) == "PR"

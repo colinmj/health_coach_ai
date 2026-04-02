@@ -131,17 +131,26 @@ def get_workout_performance(
             w.title                                          AS workout_title,
             w.start_time::date                               AS workout_date,
             COUNT(*)                                         AS total_sets,
-            COUNT(*) FILTER (WHERE s.performance_tag = 'PR')      AS pr_sets,
-            COUNT(*) FILTER (WHERE s.performance_tag = 'Better')  AS better_sets,
-            COUNT(*) FILTER (WHERE s.performance_tag = 'Neutral') AS neutral_sets,
-            COUNT(*) FILTER (WHERE s.performance_tag = 'Worse')   AS worse_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'PR')       AS pr_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Better')   AS better_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Neutral')  AS neutral_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Worse')    AS worse_sets,
+            COUNT(*) FILTER (WHERE s.performance_tag = 'Baseline') AS baseline_sets,
+            -- Baseline sets contribute NULL so they are excluded from the average.
+            -- A workout consisting entirely of first-time exercises yields NULL here.
             ROUND(AVG(CASE s.performance_tag
                 WHEN 'PR'      THEN 3
                 WHEN 'Better'  THEN 2
                 WHEN 'Neutral' THEN 1
                 WHEN 'Worse'   THEN 0
                 ELSE NULL END)::numeric, 2)                  AS performance_score,
-            MODE() WITHIN GROUP (ORDER BY s.performance_tag) AS best_tag
+            CASE
+                WHEN BOOL_AND(s.performance_tag = 'Baseline') THEN 'Baseline'
+                WHEN MAX(CASE WHEN s.performance_tag = 'PR'     THEN 3 ELSE 0 END) = 3 THEN 'PR'
+                WHEN MAX(CASE WHEN s.performance_tag = 'Better' THEN 2 ELSE 0 END) = 2 THEN 'Better'
+                WHEN MAX(CASE WHEN s.performance_tag = 'Worse'  THEN 1 ELSE 0 END) = 1 THEN 'Neutral'
+                ELSE 'Worse'
+            END                                              AS best_tag
         FROM manual_workouts  w
         JOIN manual_exercises e ON e.workout_id  = w.id
         JOIN manual_sets      s ON s.exercise_id = e.id

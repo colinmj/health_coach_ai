@@ -126,6 +126,11 @@ def create_integrations(
                 """,
                 (user_id, source, meta["auth_type"], api_key),
             )
+            if source == "hevy":
+                conn.execute(
+                    "UPDATE users SET workout_source = 'hevy' WHERE id = %s AND workout_source IS NULL",
+                    (user_id,),
+                )
         conn.commit()
 
     return {"created": len(valid)}

@@ -676,7 +676,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     source_url    TEXT,
     chunk_index   INTEGER      NOT NULL,
     content       TEXT         NOT NULL,
-    tsv           TSVECTOR     GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
+    tsv           TSVECTOR     GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     UNIQUE (document_name, chunk_index)
 );
@@ -696,18 +696,24 @@ SELECT
     SUM(CASE WHEN s.performance_tag = 'Better'  THEN 1 ELSE 0 END) AS better_sets,
     SUM(CASE WHEN s.performance_tag = 'Neutral' THEN 1 ELSE 0 END) AS neutral_sets,
     SUM(CASE WHEN s.performance_tag = 'Worse'   THEN 1 ELSE 0 END) AS worse_sets,
+    -- Baseline sets contribute NULL so they are excluded from the average.
+    -- A workout consisting entirely of first-time exercises yields NULL here.
     ROUND(AVG(CASE
         WHEN s.performance_tag = 'PR'      THEN 3.0
         WHEN s.performance_tag = 'Better'  THEN 2.0
         WHEN s.performance_tag = 'Neutral' THEN 1.0
         WHEN s.performance_tag = 'Worse'   THEN 0.0
+        -- 'Baseline' → implicit NULL, excluded from AVG
     END)::numeric, 2)                    AS performance_score,
     CASE
+        WHEN BOOL_AND(s.performance_tag = 'Baseline')                THEN 'Baseline'
         WHEN MAX(CASE WHEN s.performance_tag = 'PR'     THEN 3 ELSE 0 END) = 3 THEN 'PR'
         WHEN MAX(CASE WHEN s.performance_tag = 'Better' THEN 2 ELSE 0 END) = 2 THEN 'Better'
         WHEN MAX(CASE WHEN s.performance_tag = 'Worse'  THEN 1 ELSE 0 END) = 1 THEN 'Neutral'
         ELSE 'Worse'
-    END                                  AS best_tag
+    END                                  AS best_tag,
+    -- New column added at end (CREATE OR REPLACE VIEW requires new cols at the end)
+    SUM(CASE WHEN s.performance_tag = 'Baseline' THEN 1 ELSE 0 END) AS baseline_sets
 FROM hevy_workouts w
 JOIN hevy_exercises e ON e.workout_id  = w.id
 JOIN hevy_sets      s ON s.exercise_id = e.id

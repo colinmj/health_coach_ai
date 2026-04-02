@@ -209,12 +209,18 @@ def _execute_hevy_sync(user_id: int, program_id: str) -> dict:
                     if ex.get("exercise_template_id")
                 ]
 
-                client.create_routine(
-                    title=routine_title,
-                    folder_id=str(folder_id) if folder_id is not None else None,
-                    exercises=exercises,
-                )
-                routines_created += 1
+                try:
+                    client.create_routine(
+                        title=routine_title,
+                        folder_id=folder_id,
+                        exercises=exercises,
+                    )
+                    routines_created += 1
+                except Exception as e:
+                    raise ValueError(
+                        f"Hevy rejected '{routine_title}' — this program may have been built "
+                        f"without valid exercise IDs. Please rebuild the program. (Detail: {e})"
+                    )
 
     now = datetime.now(timezone.utc)
     with get_connection() as conn:
@@ -229,6 +235,82 @@ def _execute_hevy_sync(user_id: int, program_id: str) -> dict:
         "folder_id": str(folder_id) if folder_id is not None else None,
         "hevy_synced_at": now.isoformat(),
     }
+
+
+def _execute_session_sync(user_id: int, program_id: str, block_index: int, session_index: int) -> dict:
+    """Sync a single session from a training program to Hevy as one routine.
+
+    Returns: {routine_title, created, skipped}
+    Raises ValueError if the program is not found or not type='hevy'.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, type, blocks FROM training_programs WHERE id = %s AND user_id = %s",
+            (program_id, user_id),
+        ).fetchone()
+
+    if not row:
+        raise ValueError(f"Program {program_id} not found.")
+    if row["type"] != "hevy":
+        raise ValueError("This program is not linked to Hevy.")
+
+    program_name = row["name"]
+    blocks = row["blocks"] if isinstance(row["blocks"], list) else json.loads(row["blocks"])
+
+    try:
+        block = blocks[block_index]
+        session = block["sessions"][session_index]
+    except (IndexError, KeyError) as e:
+        raise ValueError(f"Invalid block_index={block_index} or session_index={session_index}: {e}")
+
+    block_name = block.get("name", f"Block {block_index + 1}")
+    day_label = session.get("day_label", f"Day {session_index + 1}")
+    routine_title = f"{program_name} — {block_name} — {day_label}"
+
+    api_key, _ = get_integration_tokens(user_id, "hevy")
+
+    with HevyClient(api_key) as client:
+        existing_titles = {r.get("title", "") for r in client.get_routines()}
+        if routine_title in existing_titles:
+            return {"routine_title": routine_title, "created": False, "skipped": True}
+
+        folder = client.create_routine_folder(program_name)
+        folder_id = folder.get("id") or folder.get("folder_id")
+
+        raw_exercises = [ex for ex in session.get("exercises", []) if ex.get("exercise_template_id")]
+        template_ids = [ex["exercise_template_id"] for ex in raw_exercises]
+
+        with get_connection() as conn:
+            known = {
+                r["exercise_template_id"]
+                for r in conn.execute(
+                    "SELECT DISTINCT exercise_template_id FROM hevy_exercises WHERE exercise_template_id = ANY(%s)",
+                    (template_ids,),
+                ).fetchall()
+            }
+
+        invalid = [ex for ex in raw_exercises if ex["exercise_template_id"] not in known]
+        if invalid:
+            names = ", ".join(
+                f"{ex.get('exercise_title', 'Unknown')} ({ex['exercise_template_id']})"
+                for ex in invalid
+            )
+            raise ValueError(
+                f"This session contains exercises with unrecognised Hevy IDs: {names}. "
+                f"Please rebuild the program so the agent uses real exercise IDs."
+            )
+
+        exercises = [_build_hevy_exercise(ex) for ex in raw_exercises]
+        try:
+            client.create_routine(
+                title=routine_title,
+                folder_id=folder_id,
+                exercises=exercises,
+            )
+        except Exception as e:
+            raise ValueError(f"Hevy rejected the routine. (Detail: {e})")
+
+    return {"routine_title": routine_title, "created": True, "skipped": False}
 
 
 # ---------------------------------------------------------------------------
@@ -249,12 +331,7 @@ def get_training_profile() -> str:
 
     with get_connection() as conn:
         user_row = conn.execute(
-            "SELECT training_iq, injuries, health_conditions FROM users WHERE id = %s",
-            (user_id,),
-        ).fetchone()
-
-        hevy_row = conn.execute(
-            "SELECT 1 FROM user_integrations WHERE user_id = %s AND source = 'hevy' AND access_token IS NOT NULL",
+            "SELECT training_iq, injuries, health_conditions, workout_source FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
 
@@ -312,7 +389,7 @@ def get_training_profile() -> str:
         "training_iq": user_row["training_iq"] if user_row else None,
         "injuries": user_row["injuries"] if user_row else None,
         "health_conditions": user_row["health_conditions"] if user_row else None,
-        "hevy_connected": hevy_row is not None,
+        "hevy_connected": (user_row["workout_source"] if user_row else None) == "hevy",
         "goals": [dict(r) for r in goal_rows],
         "hevy_summary": [dict(r) for r in hevy_rows],
         "recovery_summary": dict(recovery_row) if recovery_row and recovery_row["avg_recovery"] else None,
@@ -375,8 +452,13 @@ def save_training_program(
         program_type = "manual"
 
     with get_connection() as conn:
-        iq_row = conn.execute("SELECT training_iq FROM users WHERE id = %s", (user_id,)).fetchone()
+        iq_row = conn.execute(
+            "SELECT training_iq, workout_source FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
         iq = iq_row["training_iq"] if iq_row else None
+
+        if not (iq_row and iq_row["workout_source"] == "hevy"):
+            program_type = "manual"
 
         conn.execute(
             "UPDATE training_programs SET is_active = FALSE WHERE user_id = %s AND is_active = TRUE",

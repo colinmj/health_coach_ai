@@ -1,3 +1,5 @@
+import datetime
+
 from db.schema import get_connection
 
 
@@ -19,6 +21,8 @@ def get_performance_drivers(
         sleep_minutes, sleep_efficiency,
         protein_g, carbs_g, energy_kcal
     """
+    if since is None and until is None:
+        since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
     # Placeholder order matches appearance in SQL:
     # 1: recovery JOIN user_id, 2: sleep JOIN user_id, 3: nutrition JOIN user_id,
     # 4: WHERE vp.user_id, 5+: optional since/until

@@ -320,6 +320,23 @@ export async function getWorkoutProgram(id: string): Promise<TrainingProgram> {
   return res.json()
 }
 
+export async function syncSessionToHevy(
+  programId: string,
+  blockIndex: number,
+  sessionIndex: number,
+): Promise<{ routine_title: string; created: boolean; skipped: boolean }> {
+  const res = await apiFetch(`${BASE}/workout-builder/programs/${programId}/sync-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ block_index: blockIndex, session_index: sessionIndex }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail ?? 'Hevy session sync failed')
+  }
+  return res.json()
+}
+
 export async function syncProgramToHevy(programId: string): Promise<{ message: string }> {
   const res = await apiFetch(`${BASE}/workout-builder/programs/${programId}/sync-to-hevy`, { method: 'POST' })
   if (!res.ok) {

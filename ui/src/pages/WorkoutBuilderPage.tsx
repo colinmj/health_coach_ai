@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'markdown-to-jsx'
-import { ArrowUp, Square, ChevronLeft, ChevronDown, ChevronRight, X, Dumbbell, LayoutList, RefreshCw, Download, Mail, Timer, Repeat } from 'lucide-react'
+import { ArrowUp, Square, ChevronLeft, ChevronDown, ChevronRight, X, Dumbbell, LayoutList, RefreshCw, Download, Timer, Repeat } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -12,6 +12,7 @@ import {
   getWorkoutPrograms,
   getWorkoutProgram,
   syncProgramToHevy,
+
 } from '@/lib/api'
 import type { TrainingProgram, ProgramBlock, ProgramSession, ProgramExercise } from '@/types'
 
@@ -533,10 +534,6 @@ function ProgramDetail({
           Export to PDF
         </Button>
 
-        <Button variant="outline" size="sm" className="w-full" disabled title="Coming soon">
-          <Mail className="h-3.5 w-3.5 mr-1.5" />
-          Email to me
-        </Button>
       </div>
     </div>
   )

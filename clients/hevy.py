@@ -69,7 +69,7 @@ class HevyClient:
         self,
         title: str,
         notes: str = "",
-        folder_id: str | None = None,
+        folder_id: int | None = None,
         exercises: list[dict] | None = None,
     ) -> dict:
         """POST a new routine to Hevy.
@@ -92,13 +92,17 @@ class HevyClient:
             "routine": {
                 "title": title,
                 "notes": notes,
+                "folder_id": folder_id,
                 "exercises": exercises or [],
             }
         }
-        if folder_id is not None:
-            body["routine"]["folder_id"] = folder_id
         resp = self._client.post("/v1/routines", json=body)
-        resp.raise_for_status()
+        if not resp.is_success:
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} from Hevy: {resp.text}",
+                request=resp.request,
+                response=resp,
+            )
         return resp.json().get("routine", {})
 
     def __enter__(self) -> "HevyClient":

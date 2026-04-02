@@ -12,6 +12,7 @@ from agent import workout_builder as workout_builder_agent
 from agent.tools.workout_builder import (
     _db_create_training_block,
     _execute_hevy_sync,
+    _execute_session_sync,
     _query_block_performance,
 )
 
@@ -95,6 +96,24 @@ def get_program(
     if not row:
         raise HTTPException(status_code=404, detail="Program not found")
     return dict(row)
+
+
+class SyncSessionRequest(BaseModel):
+    block_index: int
+    session_index: int
+
+
+@router.post("/programs/{program_id}/sync-session")
+def sync_session_to_hevy_endpoint(
+    program_id: str,
+    body: SyncSessionRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Push a single session from a program to Hevy as one routine."""
+    try:
+        return _execute_session_sync(user_id, program_id, body.block_index, body.session_index)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/programs/{program_id}/sync-to-hevy")
