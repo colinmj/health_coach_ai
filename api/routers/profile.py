@@ -20,7 +20,6 @@ def get_profile(user_id: int = Depends(get_current_user_id)) -> dict:
 
 
 _VALID_TRAINING_IQ = {"beginner", "novice", "intermediate", "advanced", "elite"}
-_VALID_WORKOUT_SOURCE = {"hevy", "manual"}
 
 
 class ProfileUpdate(BaseModel):
@@ -32,20 +31,12 @@ class ProfileUpdate(BaseModel):
     training_iq: str | None = None
     injuries: str | None = None
     health_conditions: str | None = None
-    workout_source: str | None = None
 
     @field_validator("training_iq")
     @classmethod
     def validate_training_iq(cls, v: str | None) -> str | None:
         if v is not None and v not in _VALID_TRAINING_IQ:
             raise ValueError(f"training_iq must be one of {sorted(_VALID_TRAINING_IQ)}")
-        return v
-
-    @field_validator("workout_source")
-    @classmethod
-    def validate_workout_source(cls, v: str | None) -> str | None:
-        if v is not None and v not in _VALID_WORKOUT_SOURCE:
-            raise ValueError(f"workout_source must be one of {sorted(_VALID_WORKOUT_SOURCE)}")
         return v
 
 

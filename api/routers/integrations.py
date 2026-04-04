@@ -93,6 +93,21 @@ DATA_TYPE_LABELS = {
 _SOURCE_META = {e["source"]: e for e in CATALOGUE}
 
 
+def _update_workout_source(conn, user_id: int) -> None:
+    """Recompute and persist workout_source from active workout integrations."""
+    row = conn.execute(
+        """
+        SELECT source FROM user_integrations
+        WHERE user_id = %s AND source IN ('hevy', 'strong') AND is_active = TRUE
+        ORDER BY CASE source WHEN 'hevy' THEN 1 WHEN 'strong' THEN 2 END
+        LIMIT 1
+        """,
+        (user_id,),
+    ).fetchone()
+    source = row["source"] if row else "manual"
+    conn.execute("UPDATE users SET workout_source = %s WHERE id = %s", (source, user_id))
+
+
 @router.get("/available")
 def available_integrations() -> list[dict]:
     return CATALOGUE
@@ -126,11 +141,7 @@ def create_integrations(
                 """,
                 (user_id, source, meta["auth_type"], api_key),
             )
-            if source == "hevy":
-                conn.execute(
-                    "UPDATE users SET workout_source = 'hevy' WHERE id = %s AND workout_source IS NULL",
-                    (user_id,),
-                )
+        _update_workout_source(conn, user_id)
         conn.commit()
 
     return {"created": len(valid)}
@@ -189,4 +200,5 @@ def delete_integration(
             "DELETE FROM user_data_imports WHERE user_id = %s AND source = %s",
             (user_id, source),
         )
+        _update_workout_source(conn, user_id)
         conn.commit()

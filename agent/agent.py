@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, AIMessageChunk, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 from agent.tools import build_tools
+from agent.tools._config import build_source_map
 from agent import sessions
 import analytics.goals as goals_analytics
 import analytics.trends as trends_analytics
@@ -74,7 +75,7 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
                 else:
                     lines.append(f"    Action: {a['action_text']} [no compliance data yet]")
     return lines
-
+  
 
 def _fetch_user_profile(user_id: int) -> dict:
     """Return user profile fields used in system prompt construction."""
@@ -96,6 +97,21 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
     goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
     pinned_insights = [i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")]
     compliance_map = _fetch_compliance_map(user_id)
+    source_map = build_source_map(user_id)
+
+    _DOMAIN_LABELS = {
+        "strength":         "Strength training",
+        "recovery":         "Recovery & sleep",
+        "body_composition": "Body composition",
+        "nutrition":        "Nutrition",
+        "bloodwork":        "Bloodwork",
+    }
+    integration_lines = []
+    for domain, label in _DOMAIN_LABELS.items():
+        if domain in source_map:
+            integration_lines.append(f"- {label}: {source_map[domain]}")
+        else:
+            integration_lines.append(f"- {label}: not connected")
 
     profile_lines = [f"- Units: {units}"]
     if profile.get("name"):
@@ -112,7 +128,10 @@ def build_context_block(user_id: int, current_session_id: int | None = None) -> 
     workout_source = profile.get("workout_source") or "hevy"
     profile_lines.append(f"- Workout logging: {workout_source}")
 
-    lines = ["## User profile\n" + "\n".join(profile_lines) + "\n"]
+    lines = [
+        "## User profile\n" + "\n".join(profile_lines) + "\n",
+        "## Connected integrations\n" + "\n".join(integration_lines) + "\n",
+    ]
     lines.append("## Current goals, protocols & compliance\n")
     lines.extend(_format_goals_lines(goals, compliance_map, soon))
 
@@ -145,8 +164,11 @@ async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
         response = await llm.ainvoke([
             SystemMessage(content=(
                 "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
-                "the user might want to ask next. Output ONLY a JSON array of strings, nothing else. "
-                'Example: ["How does this compare to last week?", "What should I focus on tomorrow?"]'
+                "the user might want to ask next. "
+                "Questions MUST be written from the user's perspective using 'I' or 'my' — "
+                "never 'you' or 'your' directed at the coach. "
+                "Output ONLY a JSON array of strings, nothing else. "
+                'Example: ["How does my sleep this week compare to last week?", "What should I prioritise in my next session?", "Can I see my protein intake for the past month?"]'
             )),
             HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text[:400]}"),
         ])
@@ -171,7 +193,7 @@ async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
 
 
 SYSTEM_PROMPT = """\
-You are Coach Donnie — the AI coach behind Adonis AI.
+You are Adonis, akaCoach Donnie — the AI coach behind Adonis AI.
 
 You are not an app. You are a coach. You have access to the user's real data across every domain \
 — training, recovery, sleep, nutrition, and body composition — and your job is to connect all of \
@@ -196,6 +218,9 @@ You are not a hype machine — you don't celebrate mediocrity. You are not a col
 dashboard — you give a damn. Every message should feel like it was written for this specific \
 person, because it was.
 
+You are kind and supportive, but not too easy to please. When you give positive feedback \
+it MEANS something because your compliments don't come cheap
+
 ---
 
 ## Your voice
@@ -211,6 +236,14 @@ person, because it was.
 
 ---
 
+## Connected integrations
+The user's connected integrations are listed in the context block. \
+Only reference or ask about data from connected sources. \
+If a domain shows "not connected", do not call any tools for it and tell the user \
+it isn't set up yet if they ask. \
+Never ask a disambiguation question that involves a disconnected source — \
+e.g. do NOT ask "did you mean strength or Whoop?" if recovery is not connected.
+
 ## Data sources
 - **Strength training**: lifting sessions, per-exercise 1RM history, performance tags \
 (PR / Better / Neutral / Worse / performance_score 0–3). The user's workout logging source \
@@ -221,8 +254,6 @@ individual activity sessions (strain, max/avg HR, calories burned, sport type)
 - **Body composition (Withings)**: weight (kg), fat ratio, muscle mass, fat-free mass, bone mass
 - **Nutrition (Cronometer)**: daily macros (carbs, protein, fat), calories, and micronutrients
 - **Bloodwork (lab upload)**: biomarker values with lab reference ranges and status (low/normal/high)
-- **Health knowledge base**: reference articles on lab interpretation, \
-biomarker reference ranges, and clinical guidelines (not user-specific data)
 
 ## Workout logging source
 The user's profile above shows "Workout logging: hevy" or "Workout logging: manual". \
@@ -307,17 +338,14 @@ separately when the user asks what drives or affects their workout performance. 
 the same regression analysis in a single tool call.
 9. Convert milliseconds to hours/minutes when presenting sleep durations.
 10. Report numbers to one decimal place unless asked for more.
-11. Always present measurements in the user's preferred units (see context block). \
-If units=imperial: convert weight kg→lbs (×2.205), distance km→miles (×0.621), \
-height cm→ft/in. If units=metric, present as-is. All data is stored in metric — \
-convert at presentation time only.
+11. Strength tool weight fields (*_lbs or *_kg) are already in the user's preferred \
+units — present them as-is with the correct unit label (lbs or kg). \
+For all other weight values (body composition, nutrition), convert if needed: \
+units=imperial → kg×2.205=lbs, km×0.621=miles, cm→ft/in; units=metric → present as-is.
 12. If data is missing for a date, say so clearly.
 13. Lead with the direct answer, then supporting data. Keep responses concise.
 14. Never output raw JSON in your responses — always present data in plain language.
 15. For bloodwork questions, always include a recommendation to consult a doctor for clinical interpretation. Never diagnose or prescribe based on biomarker values.
-16. When the user asks what a biomarker result means or what the normal range is, \
-call search_health_knowledge first, then combine with get_biomarkers if the user's \
-own values are also relevant.
 
 ## Goal setting
 
@@ -392,7 +420,7 @@ def run(query: str, session_id: int | None = None) -> tuple[str, int]:
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
     llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None, max_retries=5)
-    agent = create_react_agent(llm, build_tools(), prompt=prompt)
+    agent = create_react_agent(llm, build_tools(build_source_map(user_id)), prompt=prompt)
 
     input_messages = history + [HumanMessage(content=query)]
     result = agent.invoke({"messages": input_messages}, config={"recursion_limit": 10})
@@ -444,7 +472,7 @@ async def astream_run(
     prompt = SYSTEM_PROMPT.format(today=today, context=context)
 
     llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None, max_retries=5)
-    agent = create_react_agent(llm, build_tools(), prompt=prompt)
+    agent = create_react_agent(llm, build_tools(build_source_map(user_id)), prompt=prompt)
     input_messages = history + [HumanMessage(content=query)]
 
     final_state = None

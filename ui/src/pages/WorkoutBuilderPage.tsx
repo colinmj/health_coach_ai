@@ -12,8 +12,10 @@ import {
   getWorkoutPrograms,
   getWorkoutProgram,
   syncProgramToHevy,
-
+  deleteWorkoutProgram,
+  getProfile,
 } from '@/lib/api'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { TrainingProgram, ProgramBlock, ProgramSession, ProgramExercise } from '@/types'
 
 const STARTER_PROMPTS = [
@@ -226,11 +228,13 @@ function ProgramListItem({
   program,
   isViewing,
   onClick,
+  onDelete,
 }: {
   program: TrainingProgram
   /** True when this program is currently open in the detail panel. */
   isViewing: boolean
   onClick: () => void
+  onDelete: () => void
 }) {
   const date = new Date(program.created_at).toLocaleDateString(undefined, {
     month: 'short',
@@ -239,11 +243,14 @@ function ProgramListItem({
   })
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => e.key === 'Enter' && onClick()}
       aria-pressed={isViewing}
       className={cn(
-        'w-full text-left px-3 py-3 rounded-lg transition-colors border group',
+        'w-full text-left px-3 py-3 rounded-lg transition-colors border group cursor-pointer',
         isViewing
           ? 'bg-muted/60 border-border ring-2 ring-ring/30'
           : 'border-transparent hover:bg-muted/60 hover:border-border',
@@ -254,18 +261,42 @@ function ProgramListItem({
           <p className="text-sm font-medium truncate">{program.name}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{date}</p>
         </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          {program.is_active && (
-            <Badge variant="default" className="text-[10px] px-1.5 py-0 h-4">Active</Badge>
-          )}
-          {isViewing && !program.is_active && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">Viewing</Badge>
-          )}
-          {program.goal_type && (
-            <span className="text-[10px] text-muted-foreground">
-              {GOAL_LABELS[program.goal_type] ?? program.goal_type}
-            </span>
-          )}
+        <div className="flex items-start gap-2 shrink-0">
+          <div className="flex flex-col items-end gap-1">
+            {program.is_active && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-4">Active</Badge>
+            )}
+            {isViewing && !program.is_active && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">Viewing</Badge>
+            )}
+            {program.goal_type && (
+              <span className="text-[10px] text-muted-foreground">
+                {GOAL_LABELS[program.goal_type] ?? program.goal_type}
+              </span>
+            )}
+          </div>
+          <Popover>
+            <PopoverTrigger
+              onClick={(e) => e.stopPropagation()}
+              className="p-0.5 rounded text-muted-foreground hover:text-destructive"
+              aria-label="Delete program"
+            >
+              <X className="h-3.5 w-3.5" />
+            </PopoverTrigger>
+            <PopoverContent side="left" className="p-3 w-44">
+              <p className="text-xs font-medium mb-2">Delete this program?</p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-7 text-xs flex-1"
+                  onClick={(e) => { e.stopPropagation(); onDelete() }}
+                >
+                  Delete
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       <div className="flex items-center gap-2 mt-1.5">
@@ -281,7 +312,7 @@ function ProgramListItem({
           </>
         )}
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -421,6 +452,12 @@ function ProgramDetail({
     queryFn: () => getWorkoutProgram(programId),
   })
 
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: getProfile,
+  })
+  const hevyConnected = (profile as Record<string, unknown> | undefined)?.workout_source === 'hevy'
+
   async function handleSyncToHevy() {
     setSyncing(true)
     setSyncResult(null)
@@ -511,7 +548,7 @@ function ProgramDetail({
           </p>
         )}
 
-        {program.type === 'hevy' && (
+        {program.type === 'hevy' && hevyConnected && (
           <Button
             variant="outline"
             size="sm"
@@ -545,11 +582,18 @@ function ProgramDetail({
 
 function ProgramsPanel({ onClose }: { onClose: () => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const { data: programs, isLoading } = useQuery({
     queryKey: ['workout-programs'],
     queryFn: getWorkoutPrograms,
   })
+
+  async function handleDelete(programId: string) {
+    await deleteWorkoutProgram(programId)
+    if (selectedId === programId) setSelectedId(null)
+    queryClient.invalidateQueries({ queryKey: ['workout-programs'] })
+  }
 
   return (
     <div className="flex flex-col h-full border-l bg-background">
@@ -586,6 +630,7 @@ function ProgramsPanel({ onClose }: { onClose: () => void }) {
               program={p}
               isViewing={selectedId === p.id}
               onClick={() => setSelectedId(p.id)}
+              onDelete={() => handleDelete(p.id)}
             />
           ))}
         </div>

@@ -17,7 +17,7 @@ def list_sessions(user_id: int = Depends(get_current_user_id)) -> list[dict]:
             """
             SELECT id, title, summary, pinned, created_at, updated_at
             FROM sessions
-            WHERE user_id = %s
+            WHERE user_id = %s AND session_type = 'chat'
             ORDER BY pinned DESC, updated_at DESC
             """,
             (user_id,),

@@ -1,5 +1,6 @@
 import datetime
 import os
+import uuid
 from contextvars import ContextVar
 from decimal import Decimal
 from pathlib import Path
@@ -20,6 +21,7 @@ def set_current_user_id(user_id: int) -> None:
 load_dotenv()
 
 _SCHEMA_FILE = Path(__file__).parent / "postgres_schema.sql"
+_SEED_EXERCISES_FILE = Path(__file__).parent / "seed_exercises.sql"
 
 
 def _serializable_row(cursor):
@@ -34,7 +36,8 @@ def _serializable_row(cursor):
         return {
             k: (
                 v.isoformat() if isinstance(v, datetime.date)
-                else float(v) if isinstance(v, Decimal)
+                else str(v)    if isinstance(v, uuid.UUID)
+                else float(v)  if isinstance(v, Decimal)
                 else v
             )
             for k, v in row.items()
@@ -49,10 +52,13 @@ def get_connection() -> psycopg.Connection[dict[str, Any]]:
 
 
 def init_db() -> None:
-    """Create all tables, views, and indexes (idempotent)."""
+    """Create all tables, views, and indexes (idempotent), then seed the exercise library."""
     sql = _SCHEMA_FILE.read_text()
     with get_connection() as conn:
         conn.execute(sql)
+        count = conn.execute("SELECT COUNT(*) FROM exercises WHERE source = 'adonis'").fetchone()["count"]
+        if count == 0:
+            conn.execute(_SEED_EXERCISES_FILE.read_text())
 
 
 def get_request_user_id() -> int:

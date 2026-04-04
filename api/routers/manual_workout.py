@@ -128,7 +128,7 @@ def get_workout(
 
         exercise_rows = conn.execute(
             """
-            SELECT id, exercise_template_id, title, notes, exercise_index
+            SELECT id, exercise_id, title, notes, exercise_index
             FROM manual_exercises
             WHERE workout_id = %s
             ORDER BY exercise_index

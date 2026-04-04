@@ -7,6 +7,47 @@
 
 
 -- -----------------------------------------------------------------------------
+-- Revert: move all tables back to public and drop named schemas (idempotent)
+-- -----------------------------------------------------------------------------
+
+DO $$ BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'hevy_workouts'     AND schemaname = 'workout') THEN ALTER TABLE workout.hevy_workouts     SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'hevy_exercises'    AND schemaname = 'workout') THEN ALTER TABLE workout.hevy_exercises    SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'hevy_sets'         AND schemaname = 'workout') THEN ALTER TABLE workout.hevy_sets         SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'strong_workouts'   AND schemaname = 'workout') THEN ALTER TABLE workout.strong_workouts   SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'strong_exercises'  AND schemaname = 'workout') THEN ALTER TABLE workout.strong_exercises  SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'strong_sets'       AND schemaname = 'workout') THEN ALTER TABLE workout.strong_sets       SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'manual_workouts'   AND schemaname = 'workout') THEN ALTER TABLE workout.manual_workouts   SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'manual_exercises'  AND schemaname = 'workout') THEN ALTER TABLE workout.manual_exercises  SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'manual_sets'       AND schemaname = 'workout') THEN ALTER TABLE workout.manual_sets       SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'exercises'         AND schemaname = 'workout') THEN ALTER TABLE workout.exercises         SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'training_programs' AND schemaname = 'workout') THEN ALTER TABLE workout.training_programs SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'training_blocks'   AND schemaname = 'workout') THEN ALTER TABLE workout.training_blocks   SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'form_analyses'     AND schemaname = 'workout') THEN ALTER TABLE workout.form_analyses     SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'recovery'          AND schemaname = 'health')  THEN ALTER TABLE health.recovery           SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'sleep'             AND schemaname = 'health')  THEN ALTER TABLE health.sleep              SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'activities'        AND schemaname = 'health')  THEN ALTER TABLE health.activities         SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'body_measurements' AND schemaname = 'health')  THEN ALTER TABLE health.body_measurements  SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'nutrition_daily'   AND schemaname = 'health')  THEN ALTER TABLE health.nutrition_daily    SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'nutrition_foods'   AND schemaname = 'health')  THEN ALTER TABLE health.nutrition_foods    SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'biomarkers'        AND schemaname = 'health')  THEN ALTER TABLE health.biomarkers         SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'sessions'          AND schemaname = 'agent')   THEN ALTER TABLE agent.sessions            SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'messages'          AND schemaname = 'agent')   THEN ALTER TABLE agent.messages            SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'insights'          AND schemaname = 'agent')   THEN ALTER TABLE agent.insights            SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'goals'             AND schemaname = 'agent')   THEN ALTER TABLE agent.goals               SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'protocols'         AND schemaname = 'agent')   THEN ALTER TABLE agent.protocols           SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'actions'           AND schemaname = 'agent')   THEN ALTER TABLE agent.actions             SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'action_compliance' AND schemaname = 'agent')   THEN ALTER TABLE agent.action_compliance   SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'token_usage'       AND schemaname = 'platform') THEN ALTER TABLE platform.token_usage     SET SCHEMA public; END IF;
+    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'tool_usage'        AND schemaname = 'platform') THEN ALTER TABLE platform.tool_usage      SET SCHEMA public; END IF;
+    DROP SCHEMA IF EXISTS workout  CASCADE;
+    DROP SCHEMA IF EXISTS health   CASCADE;
+    DROP SCHEMA IF EXISTS agent    CASCADE;
+    DROP SCHEMA IF EXISTS platform CASCADE;
+END $$;
+
+
+-- -----------------------------------------------------------------------------
 -- Users & auth
 -- -----------------------------------------------------------------------------
 
@@ -50,7 +91,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS health_conditions TEXT;
 
 -- Migrate: workout source preference
 ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_source TEXT
-    CHECK (workout_source IN ('hevy', 'manual'));
+    CHECK (workout_source IN ('hevy', 'manual', 'strong'));
 
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id);
 
@@ -664,25 +705,6 @@ WHERE rn = 1
 ORDER BY exercise_template_id, start_time;
 
 
--- -----------------------------------------------------------------------------
--- Knowledge base — document chunks for full-text search (RAG)
--- Global documents have NULL user_id (shared). Per-user docs have a user_id FK.
--- -----------------------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS document_chunks (
-    id            SERIAL       PRIMARY KEY,
-    user_id       INTEGER      REFERENCES users(id) ON DELETE CASCADE,
-    document_name TEXT         NOT NULL,
-    source_url    TEXT,
-    chunk_index   INTEGER      NOT NULL,
-    content       TEXT         NOT NULL,
-    tsv           TSVECTOR     GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
-    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    UNIQUE (document_name, chunk_index)
-);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_tsv ON document_chunks USING GIN (tsv);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_doc_name ON document_chunks (document_name);
-
 
 CREATE OR REPLACE VIEW v_workout_performance AS
 SELECT
@@ -819,15 +841,35 @@ CREATE INDEX IF NOT EXISTS idx_training_blocks_user
 
 
 -- -----------------------------------------------------------------------------
--- Manual workout logging
+-- Canonical exercise library (shared by Manual and Strong modes)
+-- Populated by db/seed_exercises.sql on first run.
+-- Hevy has its own exercise_template_id from the API and does not use this table.
 -- -----------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS manual_exercise_templates (
-    id         TEXT        PRIMARY KEY,
-    name       TEXT        NOT NULL,
-    category   TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE TABLE IF NOT EXISTS exercises (
+    id               UUID        PRIMARY KEY,
+    name             TEXT        NOT NULL UNIQUE,
+    aliases          TEXT[]      NOT NULL DEFAULT '{}',
+    muscle_group     TEXT        NOT NULL,
+    muscles_targeted TEXT[]      NOT NULL DEFAULT '{}',
+    movement_pattern TEXT,
+    equipment        TEXT,
+    source           TEXT        NOT NULL DEFAULT 'adonis' CHECK (source IN ('adonis', 'user')),
+    created_by       INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_exercises_name         ON exercises (name);
+CREATE INDEX IF NOT EXISTS idx_exercises_muscle_group ON exercises (muscle_group);
+CREATE INDEX IF NOT EXISTS idx_exercises_source       ON exercises (source);
+CREATE INDEX IF NOT EXISTS idx_exercises_name_trgm    ON exercises USING GIN (name gin_trgm_ops);
+
+
+-- -----------------------------------------------------------------------------
+-- Manual workout logging
+-- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS manual_workouts (
     id         SERIAL      PRIMARY KEY,
@@ -840,12 +882,12 @@ CREATE TABLE IF NOT EXISTS manual_workouts (
 CREATE INDEX IF NOT EXISTS idx_manual_workouts_user ON manual_workouts (user_id, start_time DESC);
 
 CREATE TABLE IF NOT EXISTS manual_exercises (
-    id                   SERIAL  PRIMARY KEY,
-    workout_id           INTEGER NOT NULL REFERENCES manual_workouts(id) ON DELETE CASCADE,
-    exercise_template_id TEXT    REFERENCES manual_exercise_templates(id),
-    title                TEXT    NOT NULL,
-    notes                TEXT,
-    exercise_index       INTEGER
+    id             SERIAL  PRIMARY KEY,
+    workout_id     INTEGER NOT NULL REFERENCES manual_workouts(id) ON DELETE CASCADE,
+    exercise_id    UUID    REFERENCES exercises(id),
+    title          TEXT    NOT NULL,
+    notes          TEXT,
+    exercise_index INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_manual_exercises_workout ON manual_exercises (workout_id);
 
@@ -862,36 +904,26 @@ CREATE TABLE IF NOT EXISTS manual_sets (
 );
 CREATE INDEX IF NOT EXISTS idx_manual_sets_exercise ON manual_sets (exercise_id);
 
--- Seed common exercise templates (idempotent)
-INSERT INTO manual_exercise_templates (id, name, category) VALUES
-    ('barbell_bench_press',      'Barbell Bench Press',      'chest'),
-    ('barbell_squat',            'Barbell Squat',            'legs'),
-    ('deadlift',                 'Deadlift',                 'back'),
-    ('overhead_press',           'Overhead Press',           'shoulders'),
-    ('barbell_row',              'Barbell Row',              'back'),
-    ('pull_up',                  'Pull Up',                  'back'),
-    ('dip',                      'Dip',                      'chest'),
-    ('incline_bench_press',      'Incline Bench Press',      'chest'),
-    ('dumbbell_curl',            'Dumbbell Curl',            'biceps'),
-    ('tricep_pushdown',          'Tricep Pushdown',          'triceps'),
-    ('leg_press',                'Leg Press',                'legs'),
-    ('romanian_deadlift',        'Romanian Deadlift',        'legs'),
-    ('hip_thrust',               'Hip Thrust',               'legs'),
-    ('lateral_raise',            'Lateral Raise',            'shoulders'),
-    ('face_pull',                'Face Pull',                'shoulders'),
-    ('cable_row',                'Cable Row',                'back'),
-    ('lat_pulldown',             'Lat Pulldown',             'back'),
-    ('front_squat',              'Front Squat',              'legs'),
-    ('sumo_deadlift',            'Sumo Deadlift',            'legs'),
-    ('hack_squat',               'Hack Squat',               'legs'),
-    ('leg_curl',                 'Leg Curl',                 'legs'),
-    ('leg_extension',            'Leg Extension',            'legs'),
-    ('calf_raise',               'Calf Raise',               'legs'),
-    ('chest_fly',                'Chest Fly',                'chest'),
-    ('incline_dumbbell_press',   'Incline Dumbbell Press',   'chest'),
-    ('dumbbell_row',             'Dumbbell Row',             'back'),
-    ('arnold_press',             'Arnold Press',             'shoulders'),
-    ('hammer_curl',              'Hammer Curl',              'biceps'),
-    ('skull_crusher',            'Skull Crusher',            'triceps'),
-    ('close_grip_bench_press',   'Close Grip Bench Press',   'triceps')
-ON CONFLICT DO NOTHING;
+-- Migration: replace manual_exercise_templates placeholder with canonical exercises table.
+-- On a fresh DB these are no-ops (columns don't exist yet).
+-- On an existing DB this drops the old text FK, adds the UUID FK, and removes the old table.
+ALTER TABLE manual_exercises DROP COLUMN IF EXISTS exercise_template_id;
+ALTER TABLE manual_exercises ADD COLUMN IF NOT EXISTS exercise_id UUID REFERENCES exercises(id);
+DROP TABLE IF EXISTS manual_exercise_templates;
+
+-- Migration: add ON DELETE SET NULL to exercises.created_by if the constraint is missing.
+-- User-contributed exercises remain in the library when the user account is deleted.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.referential_constraints rc
+        JOIN information_schema.key_column_usage kcu
+            ON rc.constraint_name = kcu.constraint_name
+        WHERE kcu.table_name = 'exercises'
+          AND kcu.column_name = 'created_by'
+          AND rc.delete_rule = 'SET NULL'
+    ) THEN
+        ALTER TABLE exercises DROP CONSTRAINT IF EXISTS exercises_created_by_fkey;
+        ALTER TABLE exercises ADD CONSTRAINT exercises_created_by_fkey
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+    END IF;
+END $$;

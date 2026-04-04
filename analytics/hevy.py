@@ -62,6 +62,50 @@ def get_workout_performance(
     return [dict(row) for row in rows]
 
 
+def get_recent_workouts(
+    user_id: int,
+    n_workouts: int = 3,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Set-level detail for the N most recent Hevy workouts."""
+    conditions = ["w.user_id = %s"]
+    params: list = [user_id]
+    if since:
+        conditions.append("w.start_time::date >= %s")
+        params.append(since)
+    if until:
+        conditions.append("w.start_time::date <= %s")
+        params.append(until)
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            w.title            AS workout_title,
+            w.start_time::date AS workout_date,
+            e.title            AS exercise_title,
+            e.exercise_index,
+            s.set_index,
+            s.set_type,
+            s.weight_kg,
+            s.reps,
+            s.rpe,
+            s.performance_tag
+        FROM hevy_workouts  w
+        JOIN hevy_exercises e ON e.workout_id  = w.id
+        JOIN hevy_sets      s ON s.exercise_id = e.id
+        WHERE w.id IN (
+            SELECT id FROM hevy_workouts
+            WHERE {where}
+            ORDER BY start_time DESC
+            LIMIT %s
+        )
+        ORDER BY w.start_time DESC, e.exercise_index, s.set_index
+    """  # noqa: S608
+    with get_connection() as conn:
+        rows = conn.execute(sql, params + [n_workouts]).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_exercise_template_ids(user_id: int) -> list[dict]:
     """All known exercises for a user with their template IDs and session counts."""
     sql = """

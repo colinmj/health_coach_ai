@@ -98,6 +98,21 @@ def get_program(
     return dict(row)
 
 
+@router.delete("/programs/{program_id}", status_code=204)
+def delete_program(
+    program_id: str,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    with get_connection() as conn:
+        result = conn.execute(
+            "DELETE FROM training_programs WHERE id = %s AND user_id = %s",
+            (program_id, user_id),
+        )
+        conn.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+
 class SyncSessionRequest(BaseModel):
     block_index: int
     session_index: int

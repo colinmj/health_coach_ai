@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 import analytics.goals as goals_analytics
 import analytics.compliance as compliance_analytics
 from db.schema import get_connection, get_request_user_id
-from agent.tools._config import _DOMAIN_ALLOWLIST, _CONFIDENCE_RANK, DEFAULT_SOURCES
+from agent.tools._config import _DOMAIN_ALLOWLIST, _CONFIDENCE_RANK, DEFAULT_SOURCES, build_source_map
 
 
 @tool
@@ -53,7 +53,7 @@ def create_goal(
     # Generate protocol + actions with a focused, self-contained system prompt
     active_insights = goals_analytics.get_active_insights(user_id)
     insights_text = json.dumps(active_insights) if active_insights else "None"
-    active_sources = list(DEFAULT_SOURCES.keys())
+    active_sources = list(build_source_map(user_id).keys())
 
     protocol_resp = llm.invoke([
         SystemMessage(content=(

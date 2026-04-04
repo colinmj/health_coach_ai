@@ -4,11 +4,8 @@ import { cn } from '@/lib/utils'
 import { getProfile } from '@/lib/api'
 
 const TRAINING_SUB_NAV = [
-  { to: '/training/overview', label: 'Overview' },
   { to: '/training/form-analyzer', label: 'Form Analyzer' },
   { to: '/training/workout-builder', label: 'Workout Builder' },
-  { to: '/training/goal-physique', label: 'Goal Physique' },
-  { to: '/training/progress-photos', label: 'Progress Photos' },
 ]
 
 function NavItem({ to, label }: { to: string; label: string }) {

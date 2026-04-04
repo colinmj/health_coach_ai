@@ -43,6 +43,18 @@ export async function loginUser(email: string, password: string): Promise<{ toke
   return res.json()
 }
 
+export async function deleteAccount(password: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/account`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? 'Failed to delete account')
+  }
+}
+
 // Profile
 export async function getProfile(): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${BASE}/profile/`)
@@ -344,6 +356,11 @@ export async function syncProgramToHevy(programId: string): Promise<{ message: s
     throw new Error((err as { detail?: string }).detail ?? 'Hevy sync failed')
   }
   return res.json()
+}
+
+export async function deleteWorkoutProgram(programId: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/workout-builder/programs/${programId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Failed to delete program')
 }
 
 export async function getTrainingBlocks(): Promise<TrainingBlock[]> {

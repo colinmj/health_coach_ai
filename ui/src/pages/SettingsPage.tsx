@@ -6,6 +6,7 @@ import {
   getAvailableIntegrations, getSyncStatus,
   getDataImports, saveDataImports,
   createIntegrations, deleteIntegration,
+  deleteAccount,
 } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -78,11 +79,73 @@ function Tabs({ active, onChange }: { active: Tab; onChange: (t: Tab) => void })
 // Profile tab
 // ---------------------------------------------------------------------------
 
+function DeleteAccountModal({ onClose }: { onClose: () => void }) {
+  const logout = useAuthStore((s) => s.logout)
+  const resetChat = useChatStore((s) => s.reset)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+
+  async function handleDelete() {
+    setError('')
+    setPending(true)
+    try {
+      await deleteAccount(password)
+      resetChat()
+      queryClient.clear()
+      logout()
+      navigate('/login', { replace: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-background rounded-lg border border-border p-6 w-full max-w-sm space-y-4 shadow-lg">
+        <h2 className="text-base font-semibold">Delete account</h2>
+        <p className="text-sm text-muted-foreground">
+          This will permanently delete your account and all your data. This cannot be undone.
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="confirm-password">Enter your password to confirm</Label>
+          <Input
+            id="confirm-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Your password"
+            autoFocus
+          />
+        </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="flex gap-2 justify-end">
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleDelete}
+            disabled={!password || pending}
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete my account'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ProfileTab() {
   const logout = useAuthStore((s) => s.logout)
   const resetChat = useChatStore((s) => s.reset)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   const { data: profile, isLoading } = useQuery({
     queryKey: ['profile'],
@@ -227,11 +290,21 @@ function ProfileTab() {
         )}
       </div>
 
-      <div className="pt-4 border-t">
+      <div className="pt-4 border-t space-y-2">
         <Button variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={handleLogout}>
           Log out
         </Button>
+        <div>
+          <Button
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive text-sm"
+            onClick={() => setShowDeleteModal(true)}
+          >
+            Delete account
+          </Button>
+        </div>
       </div>
+      {showDeleteModal && <DeleteAccountModal onClose={() => setShowDeleteModal(false)} />}
     </div>
   )
 }
@@ -449,23 +522,12 @@ function IntegrationsTab() {
     queryFn: getDataImports,
   })
 
-  const { data: profile } = useQuery({
-    queryKey: ['profile'],
-    queryFn: getProfile,
-  })
-
-  const workoutSourceMutation = useMutation({
-    mutationFn: (source: string) => updateProfile({ workout_source: source }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
-  })
-
   const [pendingAssignments, setPendingAssignments] = useState<Record<string, string>>({})
 
   const connectedMap = new Map((syncStatus as SyncIntegration[]).map((i) => [i.source, i]))
   const connected = syncStatus as SyncIntegration[]
 
   const assignments = { ...dataImports, ...pendingAssignments }
-  const workoutSource = (profile as Record<string, unknown> | undefined)?.workout_source ?? 'hevy'
 
   async function handleConnect(source: string, apiKey?: string) {
     await createIntegrations([source], apiKey ? { [source]: apiKey } : {})
@@ -513,29 +575,6 @@ function IntegrationsTab() {
         </Button>
       )}
 
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium">Workout logging</h3>
-        <p className="text-xs text-muted-foreground">
-          Choose how you log workouts. Manual mode lets you log workouts directly in the app.
-        </p>
-        <div className="flex gap-2">
-          {(['hevy', 'manual'] as const).map((source) => (
-            <button
-              key={source}
-              onClick={() => workoutSourceMutation.mutate(source)}
-              disabled={workoutSourceMutation.isPending}
-              className={cn(
-                'rounded-md border px-4 py-1.5 text-sm transition-colors capitalize',
-                workoutSource === source
-                  ? 'bg-foreground text-background border-foreground'
-                  : 'text-muted-foreground hover:bg-muted',
-              )}
-            >
-              {source === 'hevy' ? 'Hevy' : 'Manual'}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

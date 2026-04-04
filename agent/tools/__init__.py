@@ -7,6 +7,7 @@ from agent.tools.strength import (
     get_workout_1rm_history,
     get_workout_performance,
     get_exercise_list,
+    get_recent_workouts,
 )
 from agent.tools.recovery import (
     list_activity_sports,
@@ -51,7 +52,6 @@ from agent.tools.food_correlations import (
     get_food_vs_body_composition,
 )
 from agent.tools.performance_drivers import get_performance_drivers
-from agent.tools.knowledge import search_health_knowledge
 from agent.tools.form_analysis import get_form_analyses, get_form_progression, get_form_vs_strength
 
 def _cap_tool_output(result: str, max_rows: int = 150, max_chars: int = 6000) -> str:
@@ -72,10 +72,11 @@ def _cap_tool_output(result: str, max_rows: int = 150, max_chars: int = 6000) ->
 
 TOOL_REGISTRY: list[tuple] = [
     # (tool_fn,                          required_domains,              required_sources)
-    (get_exercise_prs,                   {"strength"},                  {"strength": "hevy"}),
-    (get_workout_1rm_history,            {"strength"},                  {"strength": "hevy"}),
-    (get_workout_performance,            {"strength"},                  {"strength": "hevy"}),
-    (get_exercise_list,                  {"strength"},                  {"strength": "hevy"}),
+    (get_exercise_prs,                   {"strength"},                  {}),
+    (get_workout_1rm_history,            {"strength"},                  {}),
+    (get_workout_performance,            {"strength"},                  {}),
+    (get_exercise_list,                  {"strength"},                  {}),
+    (get_recent_workouts,                {"strength"},                  {}),
     (list_activity_sports,               {"recovery"},                  {}),
     (get_activities,                     {"recovery"},                  {}),
     (get_recovery,                       {"recovery"},                  {}),
@@ -112,7 +113,6 @@ TOOL_REGISTRY: list[tuple] = [
     (get_food_vs_recovery,               {"nutrition", "recovery"},     {}),
     (get_food_vs_body_composition,       {"nutrition", "body_composition"}, {}),
     (get_performance_drivers,            {"strength", "recovery"},          {"strength": "hevy"}),
-    (search_health_knowledge,            set(),                             {}),
     (get_form_analyses,                  set(),                             {}),
     (get_form_progression,               {"strength"},                      {"strength": "hevy"}),
     (get_form_vs_strength,               {"strength"},                      {"strength": "hevy"}),

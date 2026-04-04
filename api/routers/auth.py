@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from api.auth import create_token, hash_password, verify_password
+from api.auth import create_token, get_current_user_id, hash_password, verify_password
 from db.schema import get_connection
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -60,3 +60,29 @@ def login(body: AuthRequest) -> dict:
         ).fetchone() is not None
 
     return {"token": create_token(row["id"]), "user_id": row["id"], "has_integrations": has_integrations}
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@router.delete("/account", status_code=204)
+def delete_account(
+    body: DeleteAccountRequest,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    """Permanently delete the authenticated user's account and all their data."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
+
+    if not row or not row["password_hash"] or not verify_password(body.password, row["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password",
+        )
+
+    with get_connection() as conn:
+        conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        conn.commit()

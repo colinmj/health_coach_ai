@@ -9,7 +9,6 @@ Pipeline:
 import base64
 import json
 import os
-import re
 import time
 from datetime import date
 
@@ -113,26 +112,64 @@ def parse_workout_input(
     return parsed
 
 
-def resolve_or_create_template(conn, exercise_name: str) -> str:
-    """Return the template id for an exercise name, creating a new row if needed.
+_FUZZY_THRESHOLD = 0.3  # pg_trgm similarity threshold (0–1); tune if too aggressive
 
-    Does a case-insensitive ILIKE lookup against manual_exercise_templates.name.
-    If no match, generates a slug id and inserts a new row.
+
+def resolve_or_create_template(conn, exercise_name: str, user_id: int | None = None) -> str:
+    """Return the exercises.id (UUID) for a given exercise name.
+
+    Resolution order:
+      1. Case-insensitive exact match on exercises.name
+      2. Case-insensitive match against any element of exercises.aliases
+      3. pg_trgm fuzzy similarity match on name (handles abbreviations/OCR noise)
+      4. Not found → insert a new row with source='user' and return its id
+
+    Returns a UUID string.
     """
+    name = exercise_name.strip()
+
+    # 1. Exact name match (case-insensitive)
     row = conn.execute(
-        "SELECT id FROM manual_exercise_templates WHERE name ILIKE %s LIMIT 1",
-        (exercise_name.strip(),),
+        "SELECT id FROM exercises WHERE name ILIKE %s LIMIT 1",
+        (name,),
     ).fetchone()
-
     if row:
-        return row["id"]
+        return str(row["id"])
 
-    slug = re.sub(r"[^a-z0-9]+", "_", exercise_name.strip().lower()).strip("_")
-    conn.execute(
-        "INSERT INTO manual_exercise_templates (id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-        (slug, exercise_name.strip()),
-    )
-    return slug
+    # 2. Alias match (exact, case-insensitive)
+    row = conn.execute(
+        "SELECT id FROM exercises WHERE %s ILIKE ANY(aliases) LIMIT 1",
+        (name,),
+    ).fetchone()
+    if row:
+        return str(row["id"])
+
+    # 3. Fuzzy match on name using trigram similarity
+    row = conn.execute(
+        """
+        SELECT id, similarity(name, %s::text) AS sim
+        FROM exercises
+        WHERE similarity(name, %s::text) >= %s
+        ORDER BY sim DESC
+        LIMIT 1
+        """,
+        (name, name, _FUZZY_THRESHOLD),
+    ).fetchone()
+    if row:
+        return str(row["id"])
+
+    # 4. Create user-contributed exercise
+    new_row = conn.execute(
+        """
+        INSERT INTO exercises (id, name, aliases, muscle_group, muscles_targeted, source, created_by)
+        VALUES (gen_random_uuid(), %s, %s, %s, %s, 'user', %s)
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id
+        """,
+        (name, [], "Other", [], user_id),
+    ).fetchone()
+    assert new_row is not None
+    return str(new_row["id"])
 
 
 def save_manual_workout(conn, user_id: int, parsed: dict) -> int:
@@ -158,12 +195,12 @@ def save_manual_workout(conn, user_id: int, parsed: dict) -> int:
     workout_id: int = workout_row["id"]
 
     for idx, ex in enumerate(parsed.get("exercises", [])):
-        template_id = resolve_or_create_template(conn, ex.get("name", "Unknown"))
+        template_id = resolve_or_create_template(conn, ex.get("name", "Unknown"), user_id)
 
         exercise_row = conn.execute(
             """
             INSERT INTO manual_exercises
-                (workout_id, exercise_template_id, title, notes, exercise_index)
+                (workout_id, exercise_id, title, notes, exercise_index)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id
             """,
@@ -179,7 +216,7 @@ def save_manual_workout(conn, user_id: int, parsed: dict) -> int:
             FROM manual_sets s
             JOIN manual_exercises e ON s.exercise_id = e.id
             JOIN manual_workouts w ON e.workout_id = w.id
-            WHERE e.exercise_template_id = %s
+            WHERE e.exercise_id = %s
               AND w.start_time < %s
               AND w.user_id = %s
             """,
@@ -193,7 +230,7 @@ def save_manual_workout(conn, user_id: int, parsed: dict) -> int:
             FROM manual_sets s
             JOIN manual_exercises e ON s.exercise_id = e.id
             JOIN manual_workouts w ON e.workout_id = w.id
-            WHERE e.exercise_template_id = %s
+            WHERE e.exercise_id = %s
               AND w.user_id = %s
               AND w.id != %s
             """,
