@@ -1,88 +1,46 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+import logging
+import os
 
-from api.auth import create_token, get_current_user_id, hash_password, verify_password
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from api.auth import get_current_user_id
 from db.schema import get_connection
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
-class AuthRequest(BaseModel):
-    email: str
-    password: str
+_log = logging.getLogger(__name__)
 
 
-@router.post("/register", status_code=201)
-def register(body: AuthRequest) -> dict:
-    """Create a new user account and return a JWT."""
-    if len(body.password.encode()) > 72:
-        raise HTTPException(status_code=422, detail="Password must be 72 characters or fewer")
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT id FROM users WHERE email = %s", (body.email,)
-        ).fetchone()
-        if existing:
-            raise HTTPException(status_code=409, detail="Email already registered")
-
-        row = conn.execute(
-            """
-            INSERT INTO users (email, password_hash)
-            VALUES (%s, %s)
-            RETURNING id
-            """,
-            (body.email, hash_password(body.password)),
-        ).fetchone()
-        assert row is not None
-        conn.commit()
-        user_id = row["id"]
-
-    return {"token": create_token(user_id), "user_id": user_id}
-
-
-@router.post("/login")
-def login(body: AuthRequest) -> dict:
-    """Verify credentials and return a JWT."""
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT id, password_hash FROM users WHERE email = %s", (body.email,)
-        ).fetchone()
-
-    if not row or not row["password_hash"] or not verify_password(body.password, row["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+def _delete_clerk_user(clerk_user_id: str) -> None:
+    secret = os.environ.get("CLERK_SECRET_KEY", "")
+    if not secret:
+        return
+    try:
+        httpx.delete(
+            f"https://api.clerk.com/v1/users/{clerk_user_id}",
+            headers={"Authorization": f"Bearer {secret}"},
+            timeout=10,
         )
-
-    with get_connection() as conn:
-        has_integrations = conn.execute(
-            "SELECT 1 FROM user_integrations WHERE user_id = %s AND is_active = TRUE LIMIT 1",
-            (row["id"],),
-        ).fetchone() is not None
-
-    return {"token": create_token(row["id"]), "user_id": row["id"], "has_integrations": has_integrations}
-
-
-class DeleteAccountRequest(BaseModel):
-    password: str
+    except Exception as e:
+        _log.warning("Failed to delete Clerk user %s: %s", clerk_user_id, e)
 
 
 @router.delete("/account", status_code=204)
-def delete_account(
-    body: DeleteAccountRequest,
-    user_id: int = Depends(get_current_user_id),
-) -> None:
-    """Permanently delete the authenticated user's account and all their data."""
+def delete_account(user_id: int = Depends(get_current_user_id)) -> None:
+    """Permanently delete the authenticated user's account and all their data.
+
+    Removes the local users row (cascading to all data) then deletes the Clerk
+    account so the user cannot sign back in with the same identity.
+    """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT password_hash FROM users WHERE id = %s", (user_id,)
+            "SELECT id, clerk_user_id FROM users WHERE id = %s", (user_id,)
         ).fetchone()
-
-    if not row or not row["password_hash"] or not verify_password(body.password, row["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
-        )
-
-    with get_connection() as conn:
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        clerk_user_id = row["clerk_user_id"]
         conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
+    if clerk_user_id:
+        _delete_clerk_user(clerk_user_id)

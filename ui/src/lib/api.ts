@@ -1,57 +1,45 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import type { ConfirmRequiredEvent, ManualWorkout, Message, ParsedWorkout, Session, StreamEvent, SyncIntegration, Goal, Insight, TrainingProgram, TrainingBlock } from '@/types'
-import { useAuthStore } from '@/stores/authStore'
 
 const BASE = '/api'
 
-function authHeaders(): Record<string, string> {
-  const token = useAuthStore.getState().token
+// Clerk token getter — wired up by ClerkTokenBridge in main.tsx
+let _getToken: () => Promise<string | null> = async () => null
+
+export function setClerkTokenGetter(fn: () => Promise<string | null>) {
+  _getToken = fn
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await _getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = await authHeaders()
   return fetch(url, {
     ...init,
-    headers: { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) },
+    headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
   })
 }
 
 // Auth
-export async function registerUser(email: string, password: string): Promise<{ token: string; user_id: number }> {
-  const res = await fetch(`${BASE}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
+export async function startOAuth(provider: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/oauth/${provider}/start`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? 'Registration failed')
+    throw new Error((err as { detail?: string }).detail ?? `OAuth start failed for ${provider}`)
   }
-  return res.json()
+  const { url } = await res.json()
+  if (!url) throw new Error(`No redirect URL returned for ${provider}`)
+  window.location.href = url
 }
 
-export async function loginUser(email: string, password: string): Promise<{ token: string; user_id: number; has_integrations: boolean }> {
-  const res = await fetch(`${BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
+export async function deleteAccount(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/account`, { method: 'DELETE' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? 'Login failed')
-  }
-  return res.json()
-}
-
-export async function deleteAccount(password: string): Promise<void> {
-  const res = await apiFetch(`${BASE}/auth/account`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? 'Failed to delete account')
+    throw new Error((err as { detail?: string }).detail ?? 'Failed to delete account')
   }
 }
 
@@ -238,7 +226,7 @@ export async function getInsights(): Promise<Insight[]> {
 }
 
 // Chat
-export function streamChat(
+export async function streamChat(
   query: string,
   sessionId: number | null,
   handlers: {
@@ -254,10 +242,11 @@ export function streamChat(
 ) {
   let doneReceived = false
   let errorReceived = false
+  const headers = await authHeaders()
 
   fetchEventSource(`${BASE}/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ query, session_id: sessionId, confirmed }),
     signal,
     onmessage(ev) {
@@ -283,7 +272,7 @@ export function streamChat(
 }
 
 // Workout Builder
-export function streamWorkoutBuilder(
+export async function streamWorkoutBuilder(
   query: string,
   sessionId: number | null,
   handlers: {
@@ -296,10 +285,11 @@ export function streamWorkoutBuilder(
 ) {
   let doneReceived = false
   let errorReceived = false
+  const headers = await authHeaders()
 
   fetchEventSource(`${BASE}/workout-builder/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ query, session_id: sessionId }),
     signal,
     onmessage(ev) {

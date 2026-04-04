@@ -1,59 +1,120 @@
-"""JWT auth utilities and FastAPI dependency."""
+"""Clerk-based auth utilities and FastAPI dependency.
+
+Verifies Clerk session JWTs (RS256) via the JWKS endpoint.
+On first login, creates a local users row and maps clerk_user_id → int id.
+The internal integer user_id is preserved for all downstream queries.
+"""
 
 import os
-from datetime import datetime, timedelta, timezone
+import time
 
+import httpx
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-import bcrypt
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from db.schema import set_current_user_id
+from db.schema import get_connection, set_current_user_id
 
-_ALGORITHM = "HS256"
-_TOKEN_EXPIRE_DAYS = 30
+_bearer_scheme = HTTPBearer(auto_error=True)
 
-_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# ── JWKS cache ────────────────────────────────────────────────────────────────
 
-
-def _secret() -> str:
-    s = os.environ.get("JWT_SECRET")
-    if not s:
-        raise RuntimeError("JWT_SECRET is not set in .env")
-    return s
+_jwks_cache: dict | None = None
+_jwks_fetched_at: float = 0.0
+_JWKS_TTL = 3600  # seconds
 
 
-def hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+def _get_jwks() -> dict:
+    global _jwks_cache, _jwks_fetched_at
+    now = time.time()
+    if _jwks_cache is None or now - _jwks_fetched_at > _JWKS_TTL:
+        url = os.environ["CLERK_JWKS_URL"]
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        _jwks_cache = resp.json()
+        _jwks_fetched_at = now
+    return _jwks_cache
 
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+# ── User provisioning ─────────────────────────────────────────────────────────
+
+def _get_clerk_user_email(clerk_user_id: str) -> str:
+    """Fetch the user's primary email from Clerk's Backend API."""
+    secret = os.environ.get("CLERK_SECRET_KEY", "")
+    if not secret:
+        return f"{clerk_user_id}@clerk.local"
+    try:
+        resp = httpx.get(
+            f"https://api.clerk.com/v1/users/{clerk_user_id}",
+            headers={"Authorization": f"Bearer {secret}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            primary_id = data.get("primary_email_address_id")
+            for ea in data.get("email_addresses", []):
+                if ea["id"] == primary_id:
+                    return ea["email_address"]
+    except Exception:
+        pass
+    return f"{clerk_user_id}@clerk.local"
 
 
-def create_token(user_id: int) -> str:
-    payload = {
-        "sub": str(user_id),
-        "exp": datetime.now(timezone.utc) + timedelta(days=_TOKEN_EXPIRE_DAYS),
-    }
-    return jwt.encode(payload, _secret(), algorithm=_ALGORITHM)
+def _get_or_create_user(clerk_user_id: str) -> int:
+    """Return the local int user_id for a Clerk user, creating a row if needed."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM users WHERE clerk_user_id = %s",
+            (clerk_user_id,),
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        email = _get_clerk_user_email(clerk_user_id)
+        new_row = conn.execute(
+            """
+            INSERT INTO users (clerk_user_id, email)
+            VALUES (%s, %s)
+            ON CONFLICT (email) DO UPDATE SET clerk_user_id = EXCLUDED.clerk_user_id
+            RETURNING id
+            """,
+            (clerk_user_id, email),
+        ).fetchone()
+        assert new_row is not None
+        conn.commit()
+        return new_row["id"]
 
 
-def get_current_user_id(token: str = Depends(_oauth2_scheme)) -> int:
-    """FastAPI dependency — decodes JWT and sets the ContextVar for this request."""
+# ── FastAPI dependency ────────────────────────────────────────────────────────
+
+def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+) -> int:
+    """Verify a Clerk session JWT and return the local integer user_id.
+
+    On first sign-in, provisions a new users row automatically.
+    Also sets the db.schema ContextVar so agent tools can resolve the user.
+    """
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    token = credentials.credentials
     try:
-        payload = jwt.decode(token, _secret(), algorithms=[_ALGORITHM])
-        user_id_str: str | None = payload.get("sub")
-        if user_id_str is None:
+        jwks = _get_jwks()
+        payload = jwt.decode(
+            token,
+            jwks,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+        clerk_user_id: str | None = payload.get("sub")
+        if not clerk_user_id:
             raise credentials_exc
-        user_id = int(user_id_str)
-    except (JWTError, ValueError):
+    except (JWTError, Exception):
         raise credentials_exc
 
+    user_id = _get_or_create_user(clerk_user_id)
     set_current_user_id(user_id)
     return user_id

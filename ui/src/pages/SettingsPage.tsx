@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { useClerk } from '@clerk/clerk-react'
 import {
   getProfile, updateProfile,
   getAvailableIntegrations, getSyncStatus,
   getDataImports, saveDataImports,
   createIntegrations, deleteIntegration,
-  deleteAccount,
+  deleteAccount, startOAuth,
 } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -30,19 +31,6 @@ const DATA_TYPE_LABELS: Record<string, string> = {
   nutrition:         'Nutrition',
 }
 
-async function startOAuth(provider: string) {
-  const token = useAuthStore.getState().token
-  const res = await fetch(`/api/oauth/${provider}/start`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? `OAuth start failed for ${provider}`)
-  }
-  const { url } = await res.json()
-  if (!url) throw new Error(`No redirect URL returned for ${provider}`)
-  window.location.href = url
-}
 
 // ---------------------------------------------------------------------------
 // Tab primitives
@@ -80,11 +68,10 @@ function Tabs({ active, onChange }: { active: Tab; onChange: (t: Tab) => void })
 // ---------------------------------------------------------------------------
 
 function DeleteAccountModal({ onClose }: { onClose: () => void }) {
-  const logout = useAuthStore((s) => s.logout)
+  const { signOut } = useClerk()
+  const resetOnboarding = useAuthStore((s) => s.resetOnboarding)
   const resetChat = useChatStore((s) => s.reset)
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
 
@@ -92,14 +79,13 @@ function DeleteAccountModal({ onClose }: { onClose: () => void }) {
     setError('')
     setPending(true)
     try {
-      await deleteAccount(password)
+      await deleteAccount()
       resetChat()
       queryClient.clear()
-      logout()
-      navigate('/login', { replace: true })
+      resetOnboarding()
+      await signOut()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
-    } finally {
       setPending(false)
     }
   }
@@ -111,27 +97,12 @@ function DeleteAccountModal({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-muted-foreground">
           This will permanently delete your account and all your data. This cannot be undone.
         </p>
-        <div className="space-y-1.5">
-          <Label htmlFor="confirm-password">Enter your password to confirm</Label>
-          <Input
-            id="confirm-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Your password"
-            autoFocus
-          />
-        </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex gap-2 justify-end">
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={handleDelete}
-            disabled={!password || pending}
-          >
+          <Button variant="destructive" onClick={handleDelete} disabled={pending}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete my account'}
           </Button>
         </div>
@@ -141,7 +112,8 @@ function DeleteAccountModal({ onClose }: { onClose: () => void }) {
 }
 
 function ProfileTab() {
-  const logout = useAuthStore((s) => s.logout)
+  const { signOut } = useClerk()
+  const resetOnboarding = useAuthStore((s) => s.resetOnboarding)
   const resetChat = useChatStore((s) => s.reset)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -180,11 +152,10 @@ function ProfileTab() {
     mutation.mutate(payload)
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     resetChat()
     queryClient.clear()
-    logout()
-    navigate('/login', { replace: true })
+    await signOut()
   }
 
   if (isLoading) {

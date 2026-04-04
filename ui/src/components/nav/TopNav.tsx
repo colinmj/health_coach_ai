@@ -43,7 +43,7 @@ export function TopNav() {
 
   return (
     <header className="flex h-12 shrink-0 items-center border-b bg-background px-4 gap-4">
-      <span className="text-sm font-semibold">Health Coach AI</span>
+      <span className="text-sm font-semibold">Adonis AI</span>
 
       {!isMobile && (
         <nav className="flex items-center gap-1">

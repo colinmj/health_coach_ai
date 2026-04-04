@@ -1,23 +1,13 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSyncStatus, triggerSync, uploadCsvFile, uploadAppleHealthFile } from '@/lib/api'
+import { getSyncStatus, triggerSync, uploadCsvFile, uploadAppleHealthFile, startOAuth } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Check, ExternalLink, Loader2, RefreshCw, Upload } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
 import type { SyncIntegration } from '@/types'
-
-async function startOAuth(provider: string) {
-  const token = useAuthStore.getState().token
-  const res = await fetch(`/api/oauth/${provider}/start`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const { url } = await res.json()
-  window.location.href = url
-}
 
 function IntegrationRow({
   integration,

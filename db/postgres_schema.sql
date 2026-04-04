@@ -93,6 +93,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS health_conditions TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_source TEXT
     CHECK (workout_source IN ('hevy', 'manual', 'strong'));
 
+-- Migrate: Clerk auth
+ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE;
+
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id);
 
 -- One row per (user, source). Stores OAuth tokens and tracks sync state.

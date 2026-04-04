@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 
-from api.auth import _ALGORITHM, _secret, get_current_user_id
+from api.auth import get_current_user_id
 from db.schema import get_connection
 
 router = APIRouter(prefix="/oauth", tags=["oauth"])
@@ -50,18 +50,28 @@ _PROVIDERS: dict[str, dict] = {
 }
 
 
+def _oauth_secret() -> str:
+    s = os.environ.get("OAUTH_STATE_SECRET")
+    if not s:
+        raise RuntimeError("OAUTH_STATE_SECRET is not set in .env")
+    return s
+
+
+_STATE_ALGORITHM = "HS256"
+
+
 def _make_state(user_id: int) -> str:
     payload = {
         "sub": str(user_id),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
         "nonce": secrets.token_hex(8),
     }
-    return jwt.encode(payload, _secret(), algorithm=_ALGORITHM)
+    return jwt.encode(payload, _oauth_secret(), algorithm=_STATE_ALGORITHM)
 
 
 def _verify_state(state: str) -> int:
     try:
-        payload = jwt.decode(state, _secret(), algorithms=[_ALGORITHM])
+        payload = jwt.decode(state, _oauth_secret(), algorithms=[_STATE_ALGORITHM])
         return int(payload["sub"])
     except (JWTError, ValueError, KeyError):
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")

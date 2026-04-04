@@ -132,10 +132,10 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
         prev_str = f", prev {round(nut['kcal_prev'], 1)} kcal" if nut["kcal_prev"] is not None else ""
         lines.append(f"- Avg calories: {round(nut['kcal_now'], 1)} kcal/day {arrow}{prev_str}")
 
-    if bdy_now is not None:
+    if bdy_now is not None and bdy_now["weight_kg"] is not None:
         w_now = bdy_now["weight_kg"]
-        if bdy_prev is not None:
-            delta = w_now - bdy_prev["weight_kg"] 
+        if bdy_prev is not None and bdy_prev["weight_kg"] is not None:
+            delta = w_now - bdy_prev["weight_kg"]
             lines.append(f"- Weight: {w_now:.1f} kg ({delta:+.1f} kg vs 7 days ago)")
         else:
             lines.append(f"- Weight: {w_now:.1f} kg")
