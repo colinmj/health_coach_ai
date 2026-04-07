@@ -40,14 +40,6 @@ CATALOGUE = [
         "env_key":     "OURA_CLIENT_ID",
     },
     {
-        "source":      "garmin",
-        "label":       "Garmin",
-        "description": "Sleep, HRV, strength, cardio, body composition",
-        "auth_type":   "oauth",
-        "data_types":  ["sleep", "hrv_recovery", "strength_workouts", "activities", "body_composition"],
-        "env_key":     "GARMIN_CLIENT_ID",
-    },
-    {
         "source":      "apple_health",
         "label":       "Apple Health",
         "description": "All domains — export from the Health app",

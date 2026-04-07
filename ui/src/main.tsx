@@ -15,6 +15,7 @@ import { WorkoutBuilderPage } from './pages/WorkoutBuilderPage'
 import { ManualWorkoutPage } from './pages/ManualWorkoutPage'
 import { TrainingLayout } from './layouts/TrainingLayout'
 import { useAuthStore } from './stores/authStore'
+import { useThemeStore } from './stores/themeStore'
 import { setClerkTokenGetter } from './lib/api'
 import './index.css'
 
@@ -30,6 +31,14 @@ function ClerkTokenBridge() {
   useLayoutEffect(() => {
     setClerkTokenGetter(() => getToken())
   }, [getToken])
+  return null
+}
+
+function ThemeSync() {
+  const isDark = useThemeStore((s) => s.isDark)
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [isDark])
   return null
 }
 
@@ -57,6 +66,7 @@ createRoot(document.getElementById('root')!).render(
           <BrowserRouter>
             <ClerkTokenBridge />
             <ClerkUserSync />
+            <ThemeSync />
             <Routes>
               {/* Signed-out users are redirected to Clerk's hosted sign-in page */}
               <Route

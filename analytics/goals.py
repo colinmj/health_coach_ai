@@ -105,7 +105,7 @@ def get_goals_with_protocols_and_actions(user_id: int) -> list[dict]:
             LEFT JOIN protocols p ON p.goal_id = g.id
             LEFT JOIN actions a ON a.protocol_id = p.id
             LEFT JOIN actions da ON da.goal_id = g.id AND da.protocol_id IS NULL
-            WHERE g.user_id = %s
+            WHERE g.user_id = %s AND g.status = 'active'
             ORDER BY g.id, p.id, a.id, da.id
             """,
             (user_id,),

@@ -12,7 +12,8 @@ def get_food_entries(since: str = "", until: str = "", meal_group: str = "") -> 
     since/until: optional YYYY-MM-DD strings.
     meal_group: optional filter — 'Breakfast', 'Lunch', 'Dinner', 'Snack', etc.
     Returns a JSON list with fields: date, logged_at, meal_group, food_name, amount,
-    category, energy_kcal, protein_g, carbs_g, net_carbs_g, fat_g, fiber_g."""
+    category, energy_kcal (dietary calories consumed — food intake, not calorie burn),
+    protein_g, carbs_g, net_carbs_g, fat_g, fiber_g."""
     user_id = get_request_user_id()
     return json.dumps(nutrition.get_food_entries(
         user_id=user_id,
@@ -26,10 +27,13 @@ def get_food_entries(since: str = "", until: str = "", meal_group: str = "") -> 
 def get_nutrition(since: str = "", until: str = "") -> str:
     """Return daily macros and key performance micros from Cronometer.
     since/until are optional YYYY-MM-DD strings.
-    Returns a JSON list of records with fields: date, source, energy_kcal, protein_g,
-    carbs_g, net_carbs_g, fat_g, fiber_g, sugars_g, magnesium_mg, sodium_mg,
+    Returns a JSON list of records with fields: date, source,
+    energy_kcal (dietary calories consumed — food intake, not calorie burn),
+    protein_g, carbs_g, net_carbs_g, fat_g, fiber_g, sugars_g, magnesium_mg, sodium_mg,
     potassium_mg, vitamin_d_iu, iron_mg, calcium_mg, completed."""
+    user_id = get_request_user_id()
     return json.dumps(nutrition.get_nutrition(
+        user_id=user_id,
         since=since.strip() or None,
         until=until.strip() or None,
     ))

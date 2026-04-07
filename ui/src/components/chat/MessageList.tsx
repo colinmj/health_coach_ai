@@ -1,9 +1,19 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Markdown from 'markdown-to-jsx'
 import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { cn } from '@/lib/utils'
 import { StarterPrompts } from './StarterPrompts'
+
+/** Removes JSON code blocks (```json ... ``` or ``` { ... ```) and bare JSON objects/arrays from AI messages. */
+function stripJsonCodeBlocks(text: string): string {
+  return text
+    .replace(/```json[\s\S]*?```/g, '')
+    .replace(/```\s*[{[][\s\S]*?```/g, '')
+    // Strip messages that are entirely bare JSON (no surrounding prose)
+    .replace(/^\s*[{[][\s\S]*[}\]]\s*$/, '')
+    .trim()
+}
 
 /** Strips all common markdown syntax, leaving plain text suitable for clipboard. */
 function stripMarkdown(text: string): string {
@@ -125,7 +135,28 @@ function MessageActions({ text }: MessageActionsProps) {
   )
 }
 
+const TOOL_STEPS: Record<string, string[]> = {
+  create_goal: ['Creating goal', 'Generating protocol', 'Creating actions', 'Saving goal'],
+}
+
 function TypingIndicator({ tool }: { tool: string | null }) {
+  const steps = useMemo(() => (tool ? TOOL_STEPS[tool] ?? null : null), [tool])
+  const [stepIndex, setStepIndex] = useState(0)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    setStepIndex(0)
+    if (!steps) return
+    intervalRef.current = setInterval(() => {
+      setStepIndex((i) => (i + 1) % steps.length)
+    }, 800)
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    }
+  }, [steps])
+
+  const label = steps ? steps[stepIndex] : tool ? tool.replace(/_/g, ' ') : null
+
   return (
     <div className="flex justify-start">
       <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-3">
@@ -138,9 +169,9 @@ function TypingIndicator({ tool }: { tool: string | null }) {
             />
           ))}
         </div>
-        {tool && (
+        {label && (
           <span className="text-xs text-muted-foreground capitalize">
-            {tool.replace(/_/g, ' ')}
+            {label}
           </span>
         )}
       </div>
@@ -175,7 +206,7 @@ export function MessageList() {
               'rounded-2xl px-4 py-3 text-sm leading-relaxed',
               msg.role === 'human'
                 ? 'max-w-[80%] bg-primary text-primary-foreground whitespace-pre-wrap'
-                : 'w-full md:w-3/4 bg-muted text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none',
+                : 'w-full md:w-3/4 bg-muted dark:bg-obsidian text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none',
             )}
           >
             {msg.role === 'human' ? (
@@ -196,7 +227,7 @@ export function MessageList() {
                   },
                 }}
               >
-                {msg.text}
+                {stripJsonCodeBlocks(msg.text)}
               </Markdown>
             )}
           </div>

@@ -2,6 +2,7 @@ from db.schema import get_connection
 
 
 def get_activities(
+    user_id: int,
     sport_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -11,8 +12,8 @@ def get_activities(
     sport_name is matched case-insensitively (e.g. 'hockey' matches 'Ice Hockey').
     Returns strain, HR, calories, and HR zone breakdown per session.
     """
-    conditions = ["score_state = 'SCORED'"]
-    params: list = []
+    conditions = ["score_state = 'SCORED'", "user_id = %s"]
+    params: list = [user_id]
     if sport_name is not None:
         conditions.append("sport_name ILIKE %s")
         params.append(f"%{sport_name}%")
@@ -39,6 +40,7 @@ def get_activities(
 
 
 def list_activity_sports(
+    user_id: int,
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
@@ -46,8 +48,8 @@ def list_activity_sports(
 
     Use this to discover what activities are available before querying get_activities.
     """
-    conditions = ["score_state = 'SCORED'"]
-    params: list = []
+    conditions = ["score_state = 'SCORED'", "user_id = %s"]
+    params: list = [user_id]
     if since is not None:
         conditions.append("date >= %s")
         params.append(since)
@@ -75,12 +77,13 @@ def list_activity_sports(
 
 
 def get_recovery(
+    user_id: int,
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
     """Recovery scores and HRV data, optionally filtered by date range (YYYY-MM-DD)."""
-    conditions = []
-    params: list = []
+    conditions = ["user_id = %s"]
+    params: list = [user_id]
     if since is not None:
         conditions.append("date >= %s")
         params.append(since)
@@ -92,9 +95,7 @@ def get_recovery(
                spo2_percentage, skin_temp_celsius, strain, daily_energy_kcal
         FROM recovery
         WHERE score_state = 'SCORED'
-    """
-    if conditions:
-        sql += " AND " + " AND ".join(conditions)
+        AND """ + " AND ".join(conditions)
     sql += " ORDER BY date"
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
@@ -102,13 +103,14 @@ def get_recovery(
 
 
 def get_sleep(
+    user_id: int,
     since: str | None = None,
     until: str | None = None,
     exclude_naps: bool = True,
 ) -> list[dict]:
     """Sleep performance and architecture data, optionally filtered by date range (YYYY-MM-DD)."""
-    conditions = []
-    params: list = []
+    conditions = ["user_id = %s"]
+    params: list = [user_id]
     if exclude_naps:
         conditions.append("is_nap = FALSE")
     if since is not None:
@@ -123,9 +125,7 @@ def get_sleep(
                total_in_bed_time_milli, respiratory_rate
         FROM sleep
         WHERE score_state = 'SCORED'
-    """
-    if conditions:
-        sql += " AND " + " AND ".join(conditions)
+        AND """ + " AND ".join(conditions)
     sql += " ORDER BY date"
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()

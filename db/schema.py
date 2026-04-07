@@ -8,6 +8,7 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 
 # Set by the FastAPI JWT dependency for each request so all tools resolve
@@ -46,9 +47,24 @@ def _serializable_row(cursor):
     return make_row
 
 
-def get_connection() -> psycopg.Connection[dict[str, Any]]:
-    conn = psycopg.connect(os.environ["DATABASE_URL"], row_factory=_serializable_row)
-    return conn
+_pool: ConnectionPool | None = None
+
+
+def _get_pool() -> ConnectionPool:
+    global _pool
+    if _pool is None:
+        _pool = ConnectionPool(
+            os.environ["DATABASE_URL"],
+            kwargs={"row_factory": _serializable_row},
+            min_size=2,
+            max_size=10,
+            open=True,
+        )
+    return _pool
+
+
+def get_connection():
+    return _get_pool().connection()
 
 
 def init_db() -> None:

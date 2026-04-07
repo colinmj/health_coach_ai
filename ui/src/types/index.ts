@@ -11,7 +11,7 @@ export interface Message {
   text: string
 }
 
-export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error' | 'suggested_questions' | 'confirm_required'
+export type StreamEventType = 'tool_start' | 'token' | 'done' | 'error' | 'suggested_questions' | 'confirm_required' | 'stream_reset'
 
 export interface ConfirmStats {
   last_run: string

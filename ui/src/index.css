@@ -3,6 +3,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -47,6 +48,40 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* --- Brand: Backgrounds --- */
+    --color-void: #0A0A0F;
+    --color-obsidian: #13131A;
+    --color-slate: #1C1C27;
+
+    /* --- Brand: Accents --- */
+    --color-electric: #3B6FFF;
+    --color-electric-hover: #5A8AFF;
+
+    /* --- Brand: Semantic states --- */
+    --color-pulse: #2ECC8A;
+    --color-amber: #F5A623;
+    --color-danger: #FF4D4D;
+
+    /* --- Brand: Radius tokens --- */
+    --radius-card: 12px;
+    --radius-input: 8px;
+    --radius-badge: 6px;
+    --radius-pill: 9999px;
+
+    /* --- Brand: Shadows --- */
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.6);
+    --shadow-modal: 0 8px 32px rgba(0,0,0,0.6);
+    --shadow-glow: 0 0 16px rgba(59,111,255,0.3);
+    --shadow-glow-pulse: 0 0 16px rgba(46,204,138,0.3);
+
+    /* --- Brand: Typography --- */
+    --font-mono: 'JetBrains Mono Variable', monospace;
+
+    /* --- Brand: Animations --- */
+    --animate-fade-in: fadeIn 0.2s ease-out;
+    --animate-slide-up: slideUp 0.25s ease-out;
+    --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 :root {
@@ -85,37 +120,47 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #0A0A0F;
+    --foreground: #F0F0F5;
+    --card: #13131A;
+    --card-foreground: #F0F0F5;
+    --popover: #1C1C27;
+    --popover-foreground: #F0F0F5;
+    --primary: #F0F0F5;
+    --primary-foreground: #0A0A0F;
+    --secondary: #1C1C27;
+    --secondary-foreground: #F0F0F5;
+    --muted: #1C1C27;
+    --muted-foreground: #8888A0;
+    --accent: #1C1C27;
+    --accent-foreground: #F0F0F5;
+    --destructive: #FF4D4D;
+    --border: #2A2A3A;
+    --input: #2A2A3A;
+    --ring: #3B6FFF;
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.44);
+    --sidebar: #13131A;
+    --sidebar-foreground: #F0F0F5;
+    --sidebar-primary: #3B6FFF;
+    --sidebar-primary-foreground: #F0F0F5;
+    --sidebar-accent: #1C1C27;
+    --sidebar-accent-foreground: #F0F0F5;
+    --sidebar-border: #2A2A3A;
+    --sidebar-ring: #3B6FFF;
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+@keyframes slideUp {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
 }
 
 @layer base {

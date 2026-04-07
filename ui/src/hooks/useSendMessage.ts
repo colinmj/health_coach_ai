@@ -19,6 +19,7 @@ export function useSendMessage(): UseSendMessageReturn {
     isStreaming,
     addMessage,
     appendToken,
+    clearLastAiMessage,
     setIsStreaming,
     setStreamingTool,
     setActiveSessionId,
@@ -59,8 +60,10 @@ export function useSendMessage(): UseSendMessageReturn {
           setStreamingTool(null)
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
         },
+        onStreamReset: clearLastAiMessage,
         onError: (err) => {
           console.error('[chat stream error]', err)
+          clearLastAiMessage()
           addMessage({ role: 'ai', text: 'Sorry, something went wrong. Please try again.' })
           setIsStreaming(false)
           setStreamingTool(null)

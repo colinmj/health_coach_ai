@@ -218,6 +218,11 @@ export async function getGoal(id: number): Promise<Goal> {
   return res.json()
 }
 
+export async function deleteGoal(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/goals/${id}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 204) throw new Error('Failed to delete goal')
+}
+
 // Insights
 export async function getInsights(): Promise<Insight[]> {
   const res = await apiFetch(`${BASE}/insights/`)
@@ -236,6 +241,7 @@ export async function streamChat(
     onError: (err: Error) => void
     onSuggestedQuestions: (questions: string[]) => void
     onConfirmRequired?: (event: ConfirmRequiredEvent) => void
+    onStreamReset?: () => void
   },
   signal: AbortSignal,
   confirmed = false,
@@ -259,6 +265,7 @@ export async function streamChat(
       else if (event.type === 'confirm_required' && handlers.onConfirmRequired) {
         handlers.onConfirmRequired(event as ConfirmRequiredEvent)
       }
+      else if (event.type === 'stream_reset') handlers.onStreamReset?.()
     },
     onclose() {
       if (!doneReceived && !errorReceived) handlers.onError(new Error('Stream closed unexpectedly'))

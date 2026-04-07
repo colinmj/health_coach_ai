@@ -7,7 +7,7 @@ and fed back into create_react_agent as full history.
 
 import json
 
-from langchain_core.messages import messages_to_dict, messages_from_dict, ToolMessage
+from langchain_core.messages import messages_to_dict, messages_from_dict, HumanMessage, ToolMessage
 
 from db.schema import get_connection
 
@@ -40,16 +40,35 @@ def _compress_history(messages: list, max_tool_chars: int = 1500) -> list:
     return compressed
 
 
+_HISTORY_MESSAGE_LIMIT = 60  # ~15 ReAct turns (human + AI-plan + tool-result + AI-response per turn)
+
+
 def load_messages(session_id: int) -> list:
-    """Return all messages for a session as LangChain message objects, ordered oldest-first."""
+    """Return recent messages for a session as LangChain message objects, ordered oldest-first.
+
+    Caps at _HISTORY_MESSAGE_LIMIT to prevent input-token bloat on long sessions.
+    Tool message content is further truncated by _compress_history.
+    """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT content FROM messages WHERE session_id = %s ORDER BY id",
-            (session_id,),
+            "SELECT content FROM messages WHERE session_id = %s ORDER BY id DESC LIMIT %s",
+            (session_id, _HISTORY_MESSAGE_LIMIT),
         ).fetchall()
     if not rows:
         return []
-    return _compress_history(messages_from_dict([json.loads(r["content"]) for r in rows]))
+    # fetchall returned newest-first; reverse to restore chronological order
+    rows = list(reversed(rows))
+    messages = messages_from_dict([json.loads(r["content"]) for r in rows])
+
+    # If history was trimmed mid-session, the first message may be a ToolMessage or
+    # mid-sequence AIMessage — Anthropic requires every tool_result to have a preceding
+    # tool_use. Trim to the first HumanMessage to guarantee a clean turn boundary.
+    for i, msg in enumerate(messages):
+        if isinstance(msg, HumanMessage):
+            messages = messages[i:]
+            break
+
+    return _compress_history(messages)
 
 
 def append_messages(session_id: int, new_messages: list) -> None:

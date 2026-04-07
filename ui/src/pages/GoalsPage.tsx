@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { getGoals, getInsights } from '@/lib/api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getGoals, getInsights, deleteGoal } from '@/lib/api'
 import { Collapsible } from '@base-ui/react/collapsible'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { ChevronRight, ChevronDown, Pin } from 'lucide-react'
+import { ChevronRight, ChevronDown, Pin, Trash2 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import type { Goal, Insight } from '@/types'
@@ -65,28 +65,67 @@ function InsightCard({ insight }: { insight: Insight }) {
 }
 
 function GoalCard({ goal }: { goal: Goal }) {
+  const [confirming, setConfirming] = useState(false)
+  const queryClient = useQueryClient()
   const protocolCount = goal.protocols.length
+
+  const { mutate: remove, isPending } = useMutation({
+    mutationFn: () => deleteGoal(goal.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['goals'] }),
+  })
+
   return (
     <div className="flex items-center gap-3 rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{goal.title ?? goal.goal_text}</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {goal.domains?.map((d) => (
-            <Badge key={d} variant="secondary" className="text-xs">{d}</Badge>
-          ))}
-          {goal.target_date && (
-            <Badge variant="outline" className="text-xs">
-              Due {format(new Date(goal.target_date), 'MMM d, yyyy')}
-            </Badge>
-          )}
-          {protocolCount > 0 && (
-            <span className="text-xs text-muted-foreground">
-              {protocolCount} protocol{protocolCount !== 1 ? 's' : ''}
-            </span>
-          )}
+      <Link to={`/goals/${goal.id}`} className="flex-1 flex items-center gap-3 min-w-0">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{goal.title ?? goal.goal_text}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {goal.domains?.map((d) => (
+              <Badge key={d} variant="secondary" className="text-xs">{d}</Badge>
+            ))}
+            {goal.target_date && (
+              <Badge variant="outline" className="text-xs">
+                Due {format(new Date(goal.target_date), 'MMM d, yyyy')}
+              </Badge>
+            )}
+            {protocolCount > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {protocolCount} protocol{protocolCount !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </Link>
+
+      <div className="shrink-0 flex items-center gap-1.5 pl-2">
+        {confirming ? (
+          <>
+            <button
+              onClick={() => remove()}
+              disabled={isPending}
+              className="text-xs text-destructive font-medium hover:underline disabled:opacity-50"
+            >
+              {isPending ? 'Deleting…' : 'Confirm'}
+            </button>
+            <span className="text-muted-foreground text-xs">/</span>
+            <button
+              onClick={() => setConfirming(false)}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
+            aria-label="Delete goal"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
     </div>
   )
 }
@@ -142,9 +181,7 @@ export function GoalsPage() {
           {goals && goals.length > 0 && (
             <div className="flex flex-col gap-3">
               {goals.map((goal) => (
-                <Link key={goal.id} to={`/goals/${goal.id}`}>
-                  <GoalCard goal={goal} />
-                </Link>
+                <GoalCard key={goal.id} goal={goal} />
               ))}
             </div>
           )}

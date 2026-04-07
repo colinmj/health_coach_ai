@@ -1,29 +1,8 @@
 from datetime import date, timedelta
 
-import psycopg
-
 from db.schema import get_connection
 from analytics.goals import get_active_protocols_with_actions, get_active_direct_actions
-from db.queries.metrics import (
-    fetch_nutrition_metric,
-    fetch_workout_frequency,
-    fetch_activity_frequency,
-    fetch_running_frequency,
-)
-
-
-# ---------------------------------------------------------------------------
-# Canonical metric → (table, column, aggregation) mapping
-# ---------------------------------------------------------------------------
-
-_NUTRITION_METRICS: dict[str, str] = {
-    "calories":   "energy_kcal",
-    "protein_g":  "protein_g",
-    "carbs_g":    "carbs_g",
-    "fat_g":      "fat_g",
-}
-
-_FREQUENCY_METRICS = {"workout_frequency", "activity_frequency", "running_frequency"}
+from db.queries.metrics import fetch_all_metrics
 
 
 def _met(actual, target, condition: str) -> bool | None:
@@ -45,113 +24,94 @@ def _week_window() -> tuple[date, date]:
     return week_start, week_end
 
 
-def compute_compliance_for_action(
-    conn: psycopg.Connection,
-    action: dict,
-    week_start: date,
-) -> dict:
-    """Compute actual_value and met for a single action over the given week window."""
-    week_end = week_start + timedelta(days=7)
-    metric = action["metric"]
-    condition = action["condition"]
-    target = float(action["target_value"])
-    user_id = action["user_id"]
-
-    if metric in _NUTRITION_METRICS:
-        actual = fetch_nutrition_metric(conn, user_id, _NUTRITION_METRICS[metric], week_start, week_end)
-    elif metric == "workout_frequency":
-        actual = fetch_workout_frequency(conn, user_id, week_start, week_end)
-    elif metric == "activity_frequency":
-        actual = fetch_activity_frequency(conn, user_id, week_start, week_end)
-    elif metric == "running_frequency":
-        actual = fetch_running_frequency(conn, user_id, week_start, week_end)
-    else:
-        actual = None
-
-    return {
-        "actual_value": actual,
-        "met": _met(actual, target, condition),
-    }
-
-
 def run_compliance_check(
     user_id: int,
     protocol_id: int | None = None,
 ) -> list[dict]:
     """Check compliance for all active protocols/actions (or a specific protocol).
-    Upserts action_compliance rows. Returns summary list."""
-    week_start, _ = _week_window()
+
+    Fetches all required metrics in at most 3 queries using FILTER clauses,
+    then upserts action_compliance rows. Returns a summary list.
+    """
+    week_start, week_end = _week_window()
+
+    protocols = get_active_protocols_with_actions(user_id)
+    if protocol_id is not None:
+        protocols = [p for p in protocols if p["id"] == protocol_id]
+
+    direct_actions = get_active_direct_actions(user_id) if protocol_id is None else []
+
+    # Flatten all actions so we can determine which metrics to fetch up front
+    protocol_action_pairs = [(p, a) for p in protocols for a in p.get("actions", [])]
+    all_actions = [a for _, a in protocol_action_pairs] + direct_actions
+
+    if not all_actions:
+        return []
+
+    needed_metrics = {a["metric"] for a in all_actions}
+
     results = []
-
     with get_connection() as conn:
-        protocols = get_active_protocols_with_actions(user_id)
-        if protocol_id is not None:
-            protocols = [p for p in protocols if p["id"] == protocol_id]
+        # Single batched fetch — at most 3 queries for all metrics
+        metrics = fetch_all_metrics(conn, user_id, needed_metrics, week_start, week_end)
 
-        for protocol in protocols:
-            for action in protocol.get("actions", []):
-                computed = compute_compliance_for_action(conn, action, week_start)
-                actual = computed["actual_value"]
-                met = computed["met"]
+        for protocol, action in protocol_action_pairs:
+            actual = metrics.get(action["metric"])
+            met = _met(actual, float(action["target_value"]), action["condition"])
 
-                conn.execute(
-                    """
-                    INSERT INTO action_compliance
-                        (action_id, user_id, week_start_date, target_value, actual_value, met, checked_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (action_id, week_start_date) DO UPDATE
-                        SET actual_value = EXCLUDED.actual_value,
-                            met = EXCLUDED.met,
-                            checked_at = NOW()
-                    """,
-                    (action["id"], user_id, week_start, action["target_value"], actual, met),
-                )
+            conn.execute(
+                """
+                INSERT INTO action_compliance
+                    (action_id, user_id, week_start_date, target_value, actual_value, met, checked_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (action_id, week_start_date) DO UPDATE
+                    SET actual_value = EXCLUDED.actual_value,
+                        met = EXCLUDED.met,
+                        checked_at = NOW()
+                """,
+                (action["id"], user_id, week_start, action["target_value"], actual, met),
+            )
 
-                results.append({
-                    "protocol_id": protocol["id"],
-                    "action_id": action["id"],
-                    "action_text": action["action_text"],
-                    "metric": action["metric"],
-                    "condition": action["condition"],
-                    "target_value": float(action["target_value"]),
-                    "actual_value": actual,
-                    "met": met,
-                    "week_start_date": week_start.isoformat(),
-                })
+            results.append({
+                "protocol_id": protocol["id"],
+                "action_id": action["id"],
+                "action_text": action["action_text"],
+                "metric": action["metric"],
+                "condition": action["condition"],
+                "target_value": float(action["target_value"]),
+                "actual_value": actual,
+                "met": met,
+                "week_start_date": week_start.isoformat(),
+            })
 
-        # Second pass: direct goal actions (no protocol)
-        # Skip if caller filtered to a specific protocol — filter doesn't apply here.
-        if protocol_id is None:
-            direct_actions = get_active_direct_actions(user_id)
-            for action in direct_actions:
-                computed = compute_compliance_for_action(conn, action, week_start)
-                actual = computed["actual_value"]
-                met = computed["met"]
+        for action in direct_actions:
+            actual = metrics.get(action["metric"])
+            met = _met(actual, float(action["target_value"]), action["condition"])
 
-                conn.execute(
-                    """
-                    INSERT INTO action_compliance
-                        (action_id, user_id, week_start_date, target_value, actual_value, met, checked_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (action_id, week_start_date) DO UPDATE
-                        SET actual_value = EXCLUDED.actual_value,
-                            met = EXCLUDED.met,
-                            checked_at = NOW()
-                    """,
-                    (action["id"], user_id, week_start, action["target_value"], actual, met),
-                )
+            conn.execute(
+                """
+                INSERT INTO action_compliance
+                    (action_id, user_id, week_start_date, target_value, actual_value, met, checked_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (action_id, week_start_date) DO UPDATE
+                    SET actual_value = EXCLUDED.actual_value,
+                        met = EXCLUDED.met,
+                        checked_at = NOW()
+                """,
+                (action["id"], user_id, week_start, action["target_value"], actual, met),
+            )
 
-                results.append({
-                    "protocol_id": None,
-                    "goal_id": action["goal_id"],
-                    "action_id": action["id"],
-                    "action_text": action["action_text"],
-                    "metric": action["metric"],
-                    "condition": action["condition"],
-                    "target_value": float(action["target_value"]),
-                    "actual_value": actual,
-                    "met": met,
-                    "week_start_date": week_start.isoformat(),
-                })
+            results.append({
+                "protocol_id": None,
+                "goal_id": action["goal_id"],
+                "action_id": action["id"],
+                "action_text": action["action_text"],
+                "metric": action["metric"],
+                "condition": action["condition"],
+                "target_value": float(action["target_value"]),
+                "actual_value": actual,
+                "met": met,
+                "week_start_date": week_start.isoformat(),
+            })
 
     return results

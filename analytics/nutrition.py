@@ -39,6 +39,7 @@ def get_food_entries(
 
 
 def get_nutrition(
+    user_id: int,
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict]:
@@ -47,8 +48,8 @@ def get_nutrition(
     Defaults to the last 60 days when no date range is provided."""
     if since is None and until is None:
         since = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
-    conditions = []
-    params: list = []
+    conditions = ["user_id = %s"]
+    params: list = [user_id]
     if since is not None:
         conditions.append("date >= %s")
         params.append(since)
@@ -60,9 +61,7 @@ def get_nutrition(
                fiber_g, sugars_g, magnesium_mg, sodium_mg, potassium_mg,
                vitamin_d_iu, iron_mg, calcium_mg, completed
         FROM nutrition_daily
-    """
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
+        WHERE """ + " AND ".join(conditions)
     sql += " ORDER BY date"
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()

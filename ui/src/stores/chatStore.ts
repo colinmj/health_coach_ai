@@ -20,6 +20,7 @@ interface ChatState {
   setMessages: (messages: Message[]) => void
   appendToken: (token: string) => void
   addMessage: (message: Message) => void
+  clearLastAiMessage: () => void
 
   // Streaming
   isStreaming: boolean
@@ -57,7 +58,8 @@ export const useChatStore = create<ChatState>((set) => ({
       const messages = [...state.messages]
       const last = messages[messages.length - 1]
       if (last?.role === 'ai') {
-        messages[messages.length - 1] = { ...last, text: last.text + token }
+        const newText = (last.text + token).replace(/([.!?])([A-Z])/g, '$1 $2')
+        messages[messages.length - 1] = { ...last, text: newText }
       } else {
         messages.push({ role: 'ai', text: token })
       }
@@ -65,6 +67,14 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+  clearLastAiMessage: () =>
+    set((state) => {
+      const messages = [...state.messages]
+      if (messages[messages.length - 1]?.role === 'ai') {
+        messages.pop()
+      }
+      return { messages }
+    }),
 
   isStreaming: false,
   streamingTool: null,

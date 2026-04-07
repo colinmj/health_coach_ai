@@ -25,8 +25,8 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
             cn(
               'rounded-md px-3 py-1.5 text-sm transition-colors',
               isActive
-                ? 'bg-muted text-foreground font-medium'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                ? 'bg-muted dark:bg-slate text-foreground font-medium'
+                : 'text-muted-foreground hover:bg-muted dark:hover:bg-slate hover:text-foreground',
             )
           }
         >

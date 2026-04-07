@@ -67,6 +67,7 @@ def get_recent_workouts(
     n_workouts: int = 3,
     since: str | None = None,
     until: str | None = None,
+    workout_title: str | None = None,
 ) -> list[dict]:
     """Set-level detail for the N most recent Hevy workouts."""
     conditions = ["w.user_id = %s"]
@@ -77,6 +78,9 @@ def get_recent_workouts(
     if until:
         conditions.append("w.start_time::date <= %s")
         params.append(until)
+    if workout_title:
+        conditions.append("LOWER(w.title) LIKE LOWER(%s)")
+        params.append(f"%{workout_title}%")
     where = " AND ".join(conditions)
     sql = f"""
         SELECT

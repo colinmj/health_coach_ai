@@ -6,7 +6,7 @@ import analytics.hevy as hevy
 import analytics.manual_workout as manual_workout_analytics
 from db.schema import get_connection, get_request_user_id
 
-KG_TO_LBS = 2.205
+KG_TO_LBS = 2.20462
 
 
 def _user_prefs() -> dict:
@@ -119,9 +119,17 @@ def get_workout_performance(
 
 
 @tool
-def get_recent_workouts(n_workouts: str = "3", since: str = "", until: str = "") -> str:
+def get_recent_workouts(
+    n_workouts: str = "3",
+    since: str = "",
+    until: str = "",
+    workout_title: str = "",
+) -> str:
     """Return set-level detail for the N most recent workouts.
     n_workouts defaults to 3 (max 10). since/until are optional YYYY-MM-DD strings.
+    workout_title is an optional partial-match filter (e.g. "Day 4", "Push Day") —
+    always pass this when the user asks about a specific named workout so only that
+    workout's sets are returned; do not rely on filtering the JSON yourself.
     Weight fields are already in the user's preferred units (weight_kg or weight_lbs).
     Returns a JSON list with fields: workout_title, workout_date, exercise_title,
     exercise_index, set_index, set_type, weight_kg/lbs, reps, rpe, performance_tag."""
@@ -130,13 +138,14 @@ def get_recent_workouts(n_workouts: str = "3", since: str = "", until: str = "")
     n = min(int(n_workouts.strip() or "3"), 10)
     since_ = since.strip() or None
     until_ = until.strip() or None
+    title_ = workout_title.strip() or None
     if prefs["source"] == "manual":
         rows = manual_workout_analytics.get_recent_workouts(
             user_id=user_id, n_workouts=n, since=since_, until=until_
         )
     else:
         rows = hevy.get_recent_workouts(
-            user_id=user_id, n_workouts=n, since=since_, until=until_
+            user_id=user_id, n_workouts=n, since=since_, until=until_, workout_title=title_
         )
     return json.dumps(_maybe_convert_kg(rows, prefs["units"]))
 

@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import re
 
 from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
@@ -11,6 +12,8 @@ import analytics.goals as goals_analytics
 import analytics.compliance as compliance_analytics
 from db.schema import get_connection, get_request_user_id
 from agent.tools._config import _DOMAIN_ALLOWLIST, _CONFIDENCE_RANK, DEFAULT_SOURCES, build_source_map
+
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -31,11 +34,11 @@ def create_goal(
 
     Generates a protocol and 2-3 measurable actions using its own focused prompt.
     Enforces a cap of 3 active goals.
-    Returns a JSON summary of the created goal, protocol, and actions.
+    Returns a plain-text summary of the created goal, protocol, and actions.
     """
     user_id = get_request_user_id()
 
-    llm = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, timeout=60, stop=None).with_retry(
+    llm = ChatAnthropic(model_name="claude-haiku-4-5-20251001", temperature=0, timeout=30, max_tokens=500, stop=None).with_retry(
         retry_if_exception_type=(AnthropicOverloadedError,),
         stop_after_attempt=3,
         wait_exponential_jitter=True,
@@ -44,7 +47,8 @@ def create_goal(
 
     try:
         parsed_domains = [d for d in json.loads(domains) if d in _DOMAIN_ALLOWLIST]
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("create_goal: could not parse domains %r — defaulting to []. Error: %s", domains, exc)
         parsed_domains = []
 
     target_date_val = target_date.strip() or None
@@ -52,7 +56,10 @@ def create_goal(
 
     # Generate protocol + actions with a focused, self-contained system prompt
     active_insights = goals_analytics.get_active_insights(user_id)
-    insights_text = json.dumps(active_insights) if active_insights else "None"
+    insights_text = (
+        json.dumps([{"title": i.get("title"), "effect": i.get("effect")} for i in active_insights])
+        if active_insights else "None"
+    )
     active_sources = list(build_source_map(user_id).keys())
 
     protocol_resp = llm.invoke([
@@ -93,8 +100,12 @@ def create_goal(
         if blocks:
             content = blocks[-1].strip()
         protocol_data = json.loads(content)
-    except json.JSONDecodeError:
-        return f"Failed to parse response. LLM returned: {protocol_resp.content}"
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "create_goal: failed to parse protocol LLM response. goal_text=%r raw=%r error=%s",
+            goal_text, protocol_resp.content, exc,
+        )
+        return f"Failed to parse protocol response. LLM returned: {protocol_resp.content}"
 
     goal_type = protocol_data.get("type", "complex")
 
@@ -103,85 +114,151 @@ def create_goal(
         "calories", "protein_g", "carbs_g", "fat_g", "fiber_g",
         "workout_frequency", "activity_frequency", "running_frequency",
     }
+    raw_actions = protocol_data.get("actions", [])
     actions = [
-        a for a in protocol_data.get("actions", [])
+        a for a in raw_actions
         if a.get("data_source") in active_sources
         and a.get("metric") in valid_metrics
     ]
     if not actions:
+        logger.error(
+            "create_goal: all actions filtered out. goal_text=%r active_sources=%r raw_actions=%r",
+            goal_text, active_sources, raw_actions,
+        )
         return "Could not generate valid actions for the active data sources."
 
-    with get_connection() as conn:
-        # Enforce 3-active-goals cap
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM goals WHERE user_id = %s AND status = 'active'",
-            (user_id,),
-        ).fetchone()
-        if row is None:
-            return "Failed to check active goal count. Please try again."
-        active_count = row["n"]
-        if active_count >= 3:
-            return "You already have 3 active goals. Mark one as achieved or abandoned before adding a new one."
-
-        # Insert goal
-        goal_row = conn.execute(
-            "INSERT INTO goals (user_id, raw_input, goal_text, title, domains, target_date) "
-            "VALUES (%s, %s, %s, %s, %s::jsonb, %s) RETURNING id",
-            (user_id, goal_text, goal_text, title_val, json.dumps(parsed_domains), target_date_val),
-        ).fetchone()
-        if goal_row is None:
-            return "Failed to create goal. Please try again."
-        goal_id = goal_row["id"]
-
-        if goal_type == "simple":
-            # Direct actions — no protocol needed
-            inserted_actions = []
-            for a in actions:
-                conn.execute(
-                    "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    (goal_id, user_id, a["action_text"], a["metric"], a["condition"],
-                     a["target_value"], a["data_source"], a.get("frequency", "daily")),
-                )
-                inserted_actions.append(a)
-
-            return json.dumps({
-                "goal_id": goal_id,
-                "goal_text": goal_text,
-                "domains": parsed_domains,
-                "target_date": target_date_val,
-                "actions": inserted_actions,
-            })
-
-        else:
-            # Complex goal — insert protocol then actions
-            protocol_title = protocol_data.get("title", "")
-            protocol_row = conn.execute(
-                "INSERT INTO protocols (user_id, goal_id, insight_ids, title, protocol_text, start_date, review_date) "
-                "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s, %s) RETURNING id",
-                (user_id, goal_id, protocol_title, protocol_data["protocol_text"], today, protocol_data["review_date"]),
+    try:
+        with get_connection() as conn:
+            # Enforce 3-active-goals cap
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM goals WHERE user_id = %s AND status = 'active'",
+                (user_id,),
             ).fetchone()
-            if protocol_row is None:
-                return "Failed to create protocol. Please try again."
-            protocol_id = protocol_row["id"]
+            if row is None:
+                logger.error("create_goal: COUNT query returned None. user_id=%s", user_id)
+                return "Failed to check active goal count. Please try again."
+            active_count = row["n"]
+            if active_count >= 3:
+                return "You already have 3 active goals. Mark one as achieved or abandoned before adding a new one."
 
-            inserted_actions = []
-            for a in actions:
-                conn.execute(
-                    "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    (protocol_id, user_id, a["action_text"], a["metric"], a["condition"],
-                     a["target_value"], a["data_source"], a.get("frequency", "daily")),
+            # Enforce one active goal per domain
+            if parsed_domains:
+                domain_rows = conn.execute(
+                    "SELECT goal_text, domains FROM goals WHERE user_id = %s AND status = 'active'",
+                    (user_id,),
+                ).fetchall()
+                for existing in domain_rows:
+                    existing_domains = existing["domains"] or []
+                    overlap = set(parsed_domains) & set(existing_domains)
+                    if overlap:
+                        overlap_str = ", ".join(sorted(overlap))
+                        return (
+                            f"Domain conflict: you already have an active goal covering {overlap_str}. "
+                            f"Only one active goal per domain is allowed. "
+                            f"Existing goal: \"{existing['goal_text'][:80]}\". "
+                            f"Mark it as achieved or abandoned before creating a new {overlap_str} goal."
+                        )
+
+            # Enforce one active action per metric
+            proposed_metrics = [a["metric"] for a in actions]
+            if proposed_metrics:
+                conflict_rows = conn.execute(
+                    """
+                    SELECT DISTINCT a.metric FROM actions a
+                    WHERE a.user_id = %s
+                      AND a.metric = ANY(%s::text[])
+                      AND (
+                          EXISTS (SELECT 1 FROM goals g WHERE g.id = a.goal_id AND g.status = 'active')
+                          OR EXISTS (
+                              SELECT 1 FROM protocols p
+                              JOIN goals g ON p.goal_id = g.id
+                              WHERE p.id = a.protocol_id AND g.status = 'active'
+                          )
+                      )
+                    """,
+                    (user_id, proposed_metrics),
+                ).fetchall()
+                if conflict_rows:
+                    conflicts = ", ".join(r["metric"] for r in conflict_rows)
+                    return (
+                        f"Metric conflict: you already have active actions tracking {conflicts}. "
+                        f"Only one active action per metric is allowed. "
+                        f"Delete or complete the existing goal(s) covering {conflicts} before adding new ones."
+                    )
+
+            # Insert goal
+            goal_row = conn.execute(
+                "INSERT INTO goals (user_id, raw_input, goal_text, title, domains, target_date) "
+                "VALUES (%s, %s, %s, %s, %s::jsonb, %s) RETURNING id",
+                (user_id, goal_text, goal_text, title_val, json.dumps(parsed_domains), target_date_val),
+            ).fetchone()
+            if goal_row is None:
+                logger.error("create_goal: INSERT goals returned None. user_id=%s goal_text=%r", user_id, goal_text)
+                return "Failed to create goal. Please try again."
+            goal_id = goal_row["id"]
+
+            if goal_type == "simple":
+                # Direct actions — no protocol needed
+                inserted_actions = []
+                for a in actions:
+                    conn.execute(
+                        "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (goal_id, user_id, a["action_text"], a["metric"], a["condition"],
+                         a["target_value"], a["data_source"], a.get("frequency", "daily")),
+                    )
+                    inserted_actions.append(a)
+
+                action_summaries = "; ".join(
+                    f"{a['action_text']} (target: {a['condition'].replace('_', ' ')} {a['target_value']} {a['metric']}, {a.get('frequency', 'daily')})"
+                    for a in inserted_actions
                 )
-                inserted_actions.append(a)
+                return (
+                    f"Goal saved (id={goal_id}): {goal_text}. "
+                    f"Actions: {action_summaries}."
+                )
 
-            return json.dumps({
-                "goal_id": goal_id,
-                "protocol_id": protocol_id,
-                "protocol_title": protocol_title,
-                "review_date": protocol_data["review_date"],
-                "actions": inserted_actions,
-            })
+            else:
+                # Complex goal — insert protocol then actions
+                protocol_title = protocol_data.get("title", "")
+                protocol_row = conn.execute(
+                    "INSERT INTO protocols (user_id, goal_id, insight_ids, title, protocol_text, start_date, review_date) "
+                    "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s, %s) RETURNING id",
+                    (user_id, goal_id, protocol_title, protocol_data["protocol_text"], today, protocol_data["review_date"]),
+                ).fetchone()
+                if protocol_row is None:
+                    logger.error(
+                        "create_goal: INSERT protocols returned None. user_id=%s goal_id=%s",
+                        user_id, goal_id,
+                    )
+                    return "Failed to create protocol. Please try again."
+                protocol_id = protocol_row["id"]
+
+                inserted_actions = []
+                for a in actions:
+                    conn.execute(
+                        "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (protocol_id, user_id, a["action_text"], a["metric"], a["condition"],
+                         a["target_value"], a["data_source"], a.get("frequency", "daily")),
+                    )
+                    inserted_actions.append(a)
+
+                action_summaries = "; ".join(
+                    f"{a['action_text']} (target: {a['condition'].replace('_', ' ')} {a['target_value']} {a['metric']}, {a.get('frequency', 'daily')})"
+                    for a in inserted_actions
+                )
+                return (
+                    f"Goal saved (id={goal_id}): {goal_text}. "
+                    f"Protocol '{protocol_title}' created (id={protocol_id}), review date {protocol_data['review_date']}. "
+                    f"Actions: {action_summaries}."
+                )
+    except Exception:
+        logger.exception(
+            "create_goal: unexpected error. user_id=%s goal_text=%r goal_type=%r",
+            user_id, goal_text, goal_type,
+        )
+        raise
 
 
 @tool
@@ -375,55 +452,67 @@ def update_action(
     if not updates:
         return "No fields provided. Supply at least one of: action_text, condition, target_value, frequency."
 
+    try:
+        action_id_int = int(action_id)
+    except (ValueError, TypeError):
+        return f"Invalid action_id '{action_id}'. Must be a numeric ID."
+
     user_id = get_request_user_id()
     set_clause = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = NOW()"
-    values = list(updates.values()) + [int(action_id), user_id]
+    values = list(updates.values()) + [action_id_int, user_id]
 
-    with get_connection() as conn:
-        result = conn.execute(
-            f"UPDATE actions SET {set_clause} WHERE id = %s AND user_id = %s "  # noqa: S608
-            "RETURNING id, action_text, condition, target_value, frequency",
-            values,
-        ).fetchone()
-
-        if not result:
-            return f"Action {action_id} not found."
-
-        # Sync current week's compliance row when target_value changed
-        if target_float is not None:
-            today = datetime.date.today()
-            week_start = today - datetime.timedelta(days=today.weekday())
-            compliance_row = conn.execute(
-                "SELECT actual_value FROM action_compliance "
-                "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
-                (int(action_id), week_start, user_id),
+    try:
+        with get_connection() as conn:
+            result = conn.execute(
+                f"UPDATE actions SET {set_clause} WHERE id = %s AND user_id = %s "  # noqa: S608
+                "RETURNING id, action_text, condition, target_value, frequency",
+                values,
             ).fetchone()
-            if compliance_row:
-                actual = compliance_row["actual_value"]
-                effective_condition = condition or result["condition"]
-                if actual is not None:
-                    if effective_condition == "less_than":
-                        met = float(actual) < target_float
-                    elif effective_condition == "greater_than":
-                        met = float(actual) > target_float
-                    else:
-                        met = abs(float(actual) - target_float) < 0.001
-                else:
-                    met = None
-                conn.execute(
-                    "UPDATE action_compliance SET target_value = %s, met = %s "
-                    "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
-                    (target_float, met, int(action_id), week_start, user_id),
-                )
 
-    return json.dumps({
-        "updated": True,
-        "action_id": int(action_id),
-        "action_text": result["action_text"],
-        "condition": result["condition"],
-        "target_value": float(result["target_value"]),
-        "frequency": result["frequency"],
-    })
+            if not result:
+                return f"Action {action_id} not found."
+
+            # Sync current week's compliance row when target_value changed
+            if target_float is not None:
+                today = datetime.date.today()
+                week_start = today - datetime.timedelta(days=today.weekday())
+                compliance_row = conn.execute(
+                    "SELECT actual_value FROM action_compliance "
+                    "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
+                    (action_id_int, week_start, user_id),
+                ).fetchone()
+                if compliance_row:
+                    actual = compliance_row["actual_value"]
+                    effective_condition = condition or result["condition"]
+                    if actual is not None:
+                        if effective_condition == "less_than":
+                            met = float(actual) < target_float
+                        elif effective_condition == "greater_than":
+                            met = float(actual) > target_float
+                        else:
+                            met = abs(float(actual) - target_float) < 0.001
+                    else:
+                        met = None
+                    conn.execute(
+                        "UPDATE action_compliance SET target_value = %s, met = %s "
+                        "WHERE action_id = %s AND week_start_date = %s AND user_id = %s",
+                        (target_float, met, action_id_int, week_start, user_id),
+                    )
+
+            return json.dumps({
+                "updated": True,
+                "action_id": action_id_int,
+                "action_text": result["action_text"],
+                "condition": result["condition"],
+                "target_value": float(result["target_value"]),
+                "frequency": result["frequency"],
+            })
+    except Exception:
+        logger.exception(
+            "update_action: unexpected error. user_id=%s action_id=%r updates=%r",
+            user_id, action_id, updates,
+        )
+        raise
 
 
 @tool

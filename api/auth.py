@@ -5,6 +5,7 @@ On first login, creates a local users row and maps clerk_user_id → int id.
 The internal integer user_id is preserved for all downstream queries.
 """
 
+import logging
 import os
 import time
 
@@ -14,6 +15,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 from db.schema import get_connection, set_current_user_id
+
+logger = logging.getLogger(__name__)
 
 _bearer_scheme = HTTPBearer(auto_error=True)
 
@@ -29,10 +32,14 @@ def _get_jwks() -> dict:
     now = time.time()
     if _jwks_cache is None or now - _jwks_fetched_at > _JWKS_TTL:
         url = os.environ["CLERK_JWKS_URL"]
-        resp = httpx.get(url, timeout=10)
-        resp.raise_for_status()
-        _jwks_cache = resp.json()
-        _jwks_fetched_at = now
+        try:
+            resp = httpx.get(url, timeout=10)
+            resp.raise_for_status()
+            _jwks_cache = resp.json()
+            _jwks_fetched_at = now
+        except Exception as exc:
+            logger.error("Failed to fetch JWKS from %s: %s", url, exc, exc_info=True)
+            raise
     return _jwks_cache
 
 
@@ -107,12 +114,21 @@ def get_current_user_id(
             token,
             jwks,
             algorithms=["RS256"],
-            options={"verify_aud": False},
+            options={"verify_aud": False, "verify_exp": False},
         )
+        # Manual expiry check with 30s clock-skew leeway
+        exp = payload.get("exp")
+        if exp is not None and time.time() > exp + 30:
+            raise JWTError("Token has expired")
         clerk_user_id: str | None = payload.get("sub")
         if not clerk_user_id:
+            logger.warning("JWT validation failed: missing sub claim")
             raise credentials_exc
-    except (JWTError, Exception):
+    except JWTError as exc:
+        logger.warning("JWT validation failed: %s", exc)
+        raise credentials_exc
+    except Exception as exc:
+        logger.error("Unexpected error during auth (not a JWT issue): %s", exc, exc_info=True)
         raise credentials_exc
 
     user_id = _get_or_create_user(clerk_user_id)

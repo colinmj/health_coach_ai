@@ -11,6 +11,7 @@ import {
 } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
+import { useThemeStore } from '@/stores/themeStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -115,6 +116,8 @@ function ProfileTab() {
   const { signOut } = useClerk()
   const resetOnboarding = useAuthStore((s) => s.resetOnboarding)
   const resetChat = useChatStore((s) => s.reset)
+  const isDark = useThemeStore((s) => s.isDark)
+  const setIsDark = useThemeStore((s) => s.setIsDark)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -259,6 +262,30 @@ function ProfileTab() {
         {mutation.isError && (
           <p className="text-sm text-destructive">Failed to save.</p>
         )}
+      </div>
+
+      <div className="pt-4 border-t">
+        <h2 className="text-sm font-semibold mb-3">Appearance</h2>
+        <div className="flex items-center justify-between py-2">
+          <div>
+            <p className="text-sm font-medium">Dark mode</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Use the dark theme</p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={isDark}
+            onClick={() => setIsDark(!isDark)}
+            className={cn(
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              isDark ? 'bg-electric' : 'bg-muted',
+            )}
+          >
+            <span className={cn(
+              'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+              isDark ? 'translate-x-6' : 'translate-x-1',
+            )} />
+          </button>
+        </div>
       </div>
 
       <div className="pt-4 border-t space-y-2">
