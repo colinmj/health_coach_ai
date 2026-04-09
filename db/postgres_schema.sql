@@ -497,26 +497,9 @@ CREATE TABLE IF NOT EXISTS goals (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS protocols (
-    id            SERIAL      PRIMARY KEY,
-    user_id       INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id    INTEGER     REFERENCES sessions(id) ON DELETE SET NULL,
-    goal_id       INTEGER     NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
-    insight_ids   JSONB       NOT NULL DEFAULT '[]',
-    protocol_text TEXT        NOT NULL,
-    start_date    DATE        NOT NULL,
-    review_date   DATE        NOT NULL,
-    status        TEXT        NOT NULL DEFAULT 'active'
-                              CHECK (status IN ('active','completed','abandoned')),
-    outcome       TEXT        CHECK (outcome IN ('effective','ineffective','inconclusive')),
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS actions (
     id           SERIAL      PRIMARY KEY,
-    protocol_id  INTEGER     REFERENCES protocols(id) ON DELETE CASCADE,
-    goal_id      INTEGER     REFERENCES goals(id) ON DELETE CASCADE,
+    goal_id      INTEGER     NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
     user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     action_text  TEXT        NOT NULL,
     metric       TEXT        NOT NULL,
@@ -526,10 +509,7 @@ CREATE TABLE IF NOT EXISTS actions (
     frequency    TEXT        NOT NULL DEFAULT 'daily'
                              CHECK (frequency IN ('daily','weekly')),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT actions_check_parent CHECK (
-        (protocol_id IS NOT NULL AND goal_id IS NULL) OR
-        (protocol_id IS NULL AND goal_id IS NOT NULL)
-    )
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS action_compliance (
@@ -567,14 +547,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_id        ON messages  (session_
 CREATE INDEX IF NOT EXISTS idx_insights_user_status       ON insights  (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_insights_correlative       ON insights  (user_id, correlative_tool, status);
 CREATE INDEX IF NOT EXISTS idx_goals_user_status          ON goals     (user_id, status);
-CREATE INDEX IF NOT EXISTS idx_protocols_user_status      ON protocols (user_id, status);
-CREATE INDEX IF NOT EXISTS idx_protocols_goal_id          ON protocols (goal_id);
-CREATE INDEX IF NOT EXISTS idx_actions_protocol_id        ON actions   (protocol_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_action_week     ON action_compliance (action_id, week_start_date);
-
--- One active protocol per goal (DB-level guard)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_protocols_one_active_per_goal
-    ON protocols (goal_id) WHERE (status = 'active');
 
 -- Bloodwork / lab results (values encrypted at rest)
 CREATE TABLE IF NOT EXISTS biomarkers (
@@ -594,19 +567,27 @@ CREATE TABLE IF NOT EXISTS biomarkers (
 );
 CREATE INDEX IF NOT EXISTS idx_biomarkers_user_date ON biomarkers (user_id, test_date);
 
--- Migrate: allow direct goal→action (no protocol required)
-ALTER TABLE actions ADD COLUMN IF NOT EXISTS goal_id INTEGER REFERENCES goals(id) ON DELETE CASCADE;
-ALTER TABLE actions ALTER COLUMN protocol_id DROP NOT NULL;
+-- Migrate: drop protocols table — re-parent any protocol-owned actions to their grandparent goal
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'protocols') THEN
+    UPDATE actions
+    SET    goal_id     = p.goal_id,
+           protocol_id = NULL
+    FROM   protocols p
+    WHERE  actions.protocol_id = p.id
+      AND  actions.goal_id IS NULL;
+  END IF;
+END $$;
+
+DROP TABLE IF EXISTS protocols CASCADE;
+
+ALTER TABLE actions DROP COLUMN IF EXISTS protocol_id;
 ALTER TABLE actions DROP CONSTRAINT IF EXISTS actions_check_parent;
-ALTER TABLE actions ADD CONSTRAINT actions_check_parent CHECK (
-    (protocol_id IS NOT NULL AND goal_id IS NULL) OR
-    (protocol_id IS NULL AND goal_id IS NOT NULL)
-);
+ALTER TABLE actions ALTER COLUMN goal_id SET NOT NULL;
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_actions_goal_id ON actions (goal_id);
-
--- Migrate: add human-readable title to protocols
-ALTER TABLE protocols ADD COLUMN IF NOT EXISTS title TEXT;
 
 -- Migrate: session management columns
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
@@ -616,8 +597,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_pinned ON sessions (user_id, pinned
 ALTER TABLE goals    ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE insights ADD COLUMN IF NOT EXISTS title TEXT;
 
--- Migrate: track action modifications
-ALTER TABLE actions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- (updated_at added in actions table definition above)
 
 
 -- -----------------------------------------------------------------------------

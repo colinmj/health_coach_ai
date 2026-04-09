@@ -54,17 +54,6 @@ export interface Action {
   created_at: string
 }
 
-export interface Protocol {
-  id: number
-  goal_id: number
-  protocol_text: string
-  start_date: string | null
-  review_date: string | null
-  status: string
-  outcome: string | null
-  actions: Action[]
-}
-
 export interface Goal {
   id: number
   title: string | null
@@ -73,8 +62,7 @@ export interface Goal {
   target_date: string | null
   status: string
   created_at: string
-  protocols: Protocol[]
-  direct_actions: Action[]
+  actions: Action[]
 }
 
 export interface Insight {

@@ -8,8 +8,10 @@ import { StarterPrompts } from './StarterPrompts'
 /** Removes JSON code blocks (```json ... ``` or ``` { ... ```) and bare JSON objects/arrays from AI messages. */
 function stripJsonCodeBlocks(text: string): string {
   return text
-    .replace(/```json[\s\S]*?```/g, '')
-    .replace(/```\s*[{[][\s\S]*?```/g, '')
+    .replace(/```json[\s\S]*?```/g, '')          // complete ```json blocks
+    .replace(/```\s*[{[][\s\S]*?```/g, '')       // complete ``` { ... ``` blocks
+    .replace(/```json[\s\S]*/g, '')              // incomplete ```json blocks (mid-stream)
+    .replace(/```\s*[{[][\s\S]*/g, '')           // incomplete ``` { ... blocks (mid-stream)
     // Strip messages that are entirely bare JSON (no surrounding prose)
     .replace(/^\s*[{[][\s\S]*[}\]]\s*$/, '')
     .trim()
@@ -75,17 +77,22 @@ function MessageActions({ text }: MessageActionsProps) {
     setFeedback((prev) => (prev === value ? null : value))
   }, [])
 
+  const actionBtn = cn(
+    'w-7 h-7 rounded-md flex items-center justify-center transition-all duration-150',
+    'border border-[#E8E8F0] dark:border-[#2a2a3a]',
+    'text-[#c0c0d0] dark:text-[#4a4a60]',
+    'hover:border-[#3B6FFF33] hover:text-[#3B6FFF] hover:bg-[#F0F4FF]',
+    'dark:hover:bg-[#1C1C27] dark:hover:border-[#3B6FFF44]',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  )
+
   return (
-    <div className="mt-1 flex items-center gap-0.5 pl-1">
+    <div className="mt-2 flex items-center gap-1.5 pl-1">
       <button
         type="button"
         onClick={handleCopy}
         aria-label={copied ? 'Copied' : 'Copy message'}
-        className={cn(
-          'rounded p-1 transition-all duration-150',
-          'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+        className={actionBtn}
       >
         {copied ? (
           <Check className="h-3.5 w-3.5 text-green-500" />
@@ -99,13 +106,7 @@ function MessageActions({ text }: MessageActionsProps) {
         onClick={() => handleFeedback('thumbs-up')}
         aria-label="Helpful"
         aria-pressed={feedback === 'thumbs-up'}
-        className={cn(
-          'rounded p-1 transition-all duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          feedback === 'thumbs-up'
-            ? 'text-foreground hover:bg-muted'
-            : 'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
-        )}
+        className={cn(actionBtn, feedback === 'thumbs-up' && 'text-[#3B6FFF] border-[#3B6FFF44]')}
       >
         <ThumbsUp
           className="h-3.5 w-3.5"
@@ -118,13 +119,7 @@ function MessageActions({ text }: MessageActionsProps) {
         onClick={() => handleFeedback('thumbs-down')}
         aria-label="Not helpful"
         aria-pressed={feedback === 'thumbs-down'}
-        className={cn(
-          'rounded p-1 transition-all duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          feedback === 'thumbs-down'
-            ? 'text-foreground hover:bg-muted'
-            : 'text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted',
-        )}
+        className={cn(actionBtn, feedback === 'thumbs-down' && 'text-[#3B6FFF] border-[#3B6FFF44]')}
       >
         <ThumbsDown
           className="h-3.5 w-3.5"
@@ -136,7 +131,7 @@ function MessageActions({ text }: MessageActionsProps) {
 }
 
 const TOOL_STEPS: Record<string, string[]> = {
-  create_goal: ['Creating goal', 'Generating protocol', 'Creating actions', 'Saving goal'],
+  create_goal: ['Analysing goal', 'Creating actions', 'Saving goal'],
 }
 
 function TypingIndicator({ tool }: { tool: string | null }) {
@@ -203,11 +198,12 @@ export function MessageList() {
         >
           <div
             className={cn(
-              'rounded-2xl px-4 py-3 text-sm leading-relaxed',
+              'rounded-[18px] px-4 py-2.5 text-sm leading-relaxed',
               msg.role === 'human'
-                ? 'max-w-[80%] bg-primary text-primary-foreground whitespace-pre-wrap'
-                : 'w-full md:w-3/4 bg-muted dark:bg-obsidian text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none',
+                ? 'rounded-br-[4px] max-w-[420px] ml-auto text-white whitespace-pre-wrap'
+                : 'w-full md:w-3/4 bg-muted dark:bg-obsidian text-[#404058] dark:text-[#c8c8d8] prose prose-sm prose-neutral dark:prose-invert max-w-none',
             )}
+            style={msg.role === 'human' ? { backgroundColor: '#3B6FFF' } : undefined}
           >
             {msg.role === 'human' ? (
               msg.text

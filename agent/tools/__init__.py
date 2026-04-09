@@ -38,7 +38,6 @@ from agent.tools.goals import (
     get_insights,
     check_compliance,
     update_goal_status,
-    assess_protocol,
     update_action,
     update_training_iq,
 )
@@ -102,7 +101,6 @@ TOOL_REGISTRY: list[tuple] = [
     (get_insights,                       set(),                         {}),
     (check_compliance,                   set(),                         {}),
     (update_goal_status,                 set(),                         {}),
-    (assess_protocol,                    set(),                         {}),
     (update_action,                      set(),                         {}),
     (update_training_iq,                 set(),                         {}),
     (analyze_correlation,                set(),                         {}),

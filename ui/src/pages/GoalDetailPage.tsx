@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import { getGoal } from '@/lib/api'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ChevronLeft } from 'lucide-react'
 import { format } from 'date-fns'
@@ -79,36 +78,15 @@ export function GoalDetailPage() {
               )}
             </div>
 
-            {goal.protocols.length === 0 && goal.direct_actions.length === 0 && (
-              <p className="text-sm text-muted-foreground">No protocol or actions defined yet.</p>
+            {goal.actions.length === 0 && (
+              <p className="text-sm text-muted-foreground">No actions defined yet.</p>
             )}
 
-            {goal.protocols.map((protocol, i) => (
-              <div key={protocol.id} className="mb-8">
-                {goal.protocols.length > 1 && (
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Protocol {i + 1}</p>
-                )}
-                <p className="text-sm text-foreground leading-relaxed mb-4">{protocol.protocol_text}</p>
-
-                {protocol.actions.length > 0 && (
-                  <>
-                    <Separator className="mb-3" />
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Actions</p>
-                    <div className="divide-y">
-                      {protocol.actions.map((action) => (
-                        <ActionRow key={action.id} action={action} />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-
-            {goal.direct_actions.length > 0 && (
+            {goal.actions.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Direct Actions</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Actions</p>
                 <div className="divide-y">
-                  {goal.direct_actions.map((action) => (
+                  {goal.actions.map((action) => (
                     <ActionRow key={action.id} action={action} />
                   ))}
                 </div>

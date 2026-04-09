@@ -44,7 +44,7 @@ def _fetch_compliance_map(user_id: int) -> dict:
 
 
 def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) -> list[str]:
-    """Render goals/protocols/actions into a list of text lines."""
+    """Render goals and their actions into a list of text lines."""
     lines: list[str] = []
     if not goals:
         lines.append("No active goals.\n")
@@ -55,25 +55,17 @@ def _format_goals_lines(goals: list, compliance_map: dict, soon: datetime.date) 
         lines.append(f"### Goal ({goal_label}, status={g['status']})")
         if g.get("target_date"):
             lines.append(f"  Target date: {g['target_date']}")
-        for p in g.get("protocols", []):
-            protocol_label = p.get("title") or "protocol"
-            lines.append(f"  Protocol ({protocol_label}, status={p['status']}): {p['protocol_text']}")
-            review = p.get("review_date")
-            if review:
-                lines.append(f"    Review date: {review}")
-                if str(review) <= soon.isoformat():
-                    lines.append("    ⚠️ REVIEW DUE WITHIN 7 DAYS")
-            for a in p.get("actions", []):
-                comp = compliance_map.get(a["id"])
-                if comp:
-                    actual = comp["actual_value"] if comp["actual_value"] is not None else "no data"
-                    met_str = {True: "✅", False: "❌", None: "—"}.get(comp["met"], "—")
-                    lines.append(
-                        f"    Action: {a['action_text']} "
-                        f"[{met_str} actual={actual}, target={a['target_value']}]"
-                    )
-                else:
-                    lines.append(f"    Action: {a['action_text']} [no compliance data yet]")
+        for a in g.get("actions", []):
+            comp = compliance_map.get(a["id"])
+            if comp:
+                actual = comp["actual_value"] if comp["actual_value"] is not None else "no data"
+                met_str = {True: "✅", False: "❌", None: "—"}.get(comp["met"], "—")
+                lines.append(
+                    f"  Action: {a['action_text']} "
+                    f"[{met_str} actual={actual}, target={a['target_value']}]"
+                )
+            else:
+                lines.append(f"  Action: {a['action_text']} [no compliance data yet]")
     return lines
   
 
@@ -94,7 +86,7 @@ def build_context_block(user_id: int, current_session_id: int | None = None, sou
 
     profile = _fetch_user_profile(user_id)
     units = profile.get("units", "metric")
-    goals = goals_analytics.get_goals_with_protocols_and_actions(user_id)
+    goals = goals_analytics.get_goals_with_actions(user_id)
     pinned_insights = [i for i in goals_analytics.get_active_insights(user_id) if i.get("pinned")]
     compliance_map = _fetch_compliance_map(user_id)
     if source_map is None:
@@ -133,7 +125,7 @@ def build_context_block(user_id: int, current_session_id: int | None = None, sou
         "## User profile\n" + "\n".join(profile_lines) + "\n",
         "## Connected integrations\n" + "\n".join(integration_lines) + "\n",
     ]
-    lines.append("## Current goals, protocols & compliance\n")
+    lines.append("## Current goals and actions\n")
     lines.extend(_format_goals_lines(goals, compliance_map, soon))
 
     if pinned_insights:
@@ -162,7 +154,7 @@ async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
     """Make a single non-streaming LLM call to generate 2-3 follow-up questions."""
     try:
         llm = ChatAnthropic(
-            model_name="claude-haiku-4-5-20251001", temperature=0.7, timeout=15, max_tokens=200
+            model_name="claude-haiku-4-5-20251001", temperature=0, timeout=15, max_tokens=200
         ).with_retry(
             retry_if_exception_type=(AnthropicOverloadedError,),
             stop_after_attempt=3,
@@ -170,12 +162,13 @@ async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
         )
         response = await llm.ainvoke([
             SystemMessage(content=(
-                "Given this health coaching exchange, suggest 2-3 short, specific follow-up questions "
-                "the user might want to ask next. "
-                "Questions MUST be written from the user's perspective using 'I' or 'my' — "
-                "never 'you' or 'your' directed at the coach. "
-                "Output ONLY a JSON array of strings, nothing else. "
-                'Example: ["How does my sleep this week compare to last week?", "What should I prioritise in my next session?", "Can I see my protein intake for the past month?"]'
+                "Given this health coaching exchange, choose the right follow-up chips to show:\n\n"
+                "1. If the coach's reply ends with a yes/no question — e.g. 'Would you like me to...', "
+                "'Shall I...', 'Do you want to...', 'Should I...', 'Are you...', 'Can I...' — "
+                'output EXACTLY: ["Yes please!", "No thanks!"]\n\n'
+                "2. Otherwise, suggest 2-3 short, specific follow-up questions the user might want to ask. "
+                "Questions MUST be from the user's perspective using 'I' or 'my' — never 'you' or 'your'. "
+                "Output ONLY a JSON array of strings, nothing else."
             )),
             HumanMessage(content=f"User asked: {human_text}\n\nCoach replied: {ai_text[:400]}"),
         ])
@@ -188,10 +181,11 @@ async def _generate_followups(human_text: str, ai_text: str) -> list[str]:
             )
         else:
             raw = ""
-        raw = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        if not raw:
+        start = raw.find('[')
+        end = raw.rfind(']')
+        if start == -1 or end == -1 or end <= start:
             return []
-        questions = _json.loads(raw)
+        questions = _json.loads(raw[start:end + 1])
         if isinstance(questions, list):
             return [q for q in questions if isinstance(q, str)][:3]
         return []
@@ -334,7 +328,7 @@ For injury or medical concerns, provide general information but recommend the us
 If a request falls clearly outside this scope, decline briefly and redirect: "I'm focused on health and performance — let me know if there's anything in that area I can help with."
 
 ## Referring to goals, insights, and actions
-Never refer to a goal, insight, protocol, or action by its database ID.
+Never refer to a goal, insight, or action by its database ID.
 Always use the goal's title or goal text, the insight's title or first sentence, \
 or the action's action_text when referencing them in conversation.
 
@@ -377,6 +371,15 @@ units=imperial → kg×2.205=lbs, km×0.621=miles, cm→ft/in; units=metric → 
 Do NOT wrap any structured data in triple backticks. This applies to ALL tools, especially \
 create_goal. After any tool returns, narrate the result in plain language only.
 17. For bloodwork questions, always include a recommendation to consult a doctor for clinical interpretation. Never diagnose or prescribe based on biomarker values.
+18. Protein recommendations must never fall below the user's bodyweight in grams \
+(1 g per lb of bodyweight, or 2.2 g per kg). If the user's weight is available from \
+body composition data, use it. If not, default to a minimum of 160 g/day. Never \
+suggest a protein target below this floor — not as a daily goal, not as a range, \
+not as a "starting point".
+19. For bodyweight exercises (e.g. push-ups, pull-ups, dips, bodyweight squats, \
+lunges, planks), never refer to load as "weight on the bar" or "bar weight". \
+These exercises use bodyweight as resistance — describe load as "bodyweight", \
+"added load", or "resistance" as appropriate.
 
 ## Goal setting
 
@@ -403,13 +406,13 @@ user what they'd need — do NOT call create_goal:
 If a domain is missing: "To track [goal], you'd need [source] connected. Without it I \
 can't measure progress." Do NOT call create_goal.
 
-Also check the **Current goals, protocols & compliance** section above. If any active goal \
+Also check the **Current goals and actions** section above. If any active goal \
 already covers one of the new goal's required domains, tell the user: \
 "You already have an active [domain] goal: [existing goal title]. Only one active goal per \
 domain is allowed — mark it as achieved or abandoned before starting a new one." \
 Do NOT call create_goal if there is a domain conflict.
 
-Also check the **Current goals, protocols & compliance** section for existing actions. \
+Also check the **Current goals and actions** section for existing actions. \
 If any action in the new goal would track the same metric as an existing active action, \
 tell the user which metric(s) conflict and ask them to complete or delete the conflicting \
 goal first. Do NOT call create_goal if there is a metric conflict.
@@ -423,21 +426,20 @@ Insights are NOT required — proceed to Step 4 even if the user has no insights
 
 **Step 4 — Confirm before saving**
 Summarise the goal in one sentence and ask for confirmation before calling create_goal:
-  "Your goal is: lose 9 kg by 2026-06-21, measured via body weight. I'll create a protocol \
-with daily calorie and weigh-in actions. Shall I save this?"
+  "Your goal is: lose 9 kg by 2026-06-21, measured via body weight. I'll add measurable actions \
+to track progress. Shall I save this?"
 Only call create_goal after the user confirms.
 
-## Goals, protocols, and insights
+## Goals and insights
 
-- Active goals, protocols, actions, and compliance are in the context block. Always reference them.
-- After calling create_goal, summarise what was saved: goal, protocol, and each action with its \
-target. Offer to run check_compliance immediately.
+- Active goals, actions, and compliance are in the context block. Always reference them.
+- After calling create_goal, summarise what was saved: goal and each action with its target. \
+Offer to run check_compliance immediately.
 - Insights are optional. A user may have zero insights and still set goals.
 - When a correlative tool returns data, check if it confirms or contradicts an existing insight \
 for the same tool. If contradicting, offer to call save_insight.
 - Only derive a new insight when data is conclusive (≥8 data points, clear trend). Frame the \
 insight clearly and ask the user before calling save_insight.
-- If a protocol review_date is within 7 days, flag it and offer to run assess_protocol.
 - Never invent compliance figures. If actual_value is null, say "No data available."\
 """
 

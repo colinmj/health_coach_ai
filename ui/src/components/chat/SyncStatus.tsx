@@ -40,7 +40,7 @@ function IntegrationRow({
           {!integration.authorized && integration.auth_type === 'oauth' ? (
             <button
               onClick={() => startOAuth(integration.source)}
-              className="flex items-center gap-0.5 text-xs text-primary hover:underline"
+              className="flex items-center gap-0.5 text-xs hover:underline" style={{ color: '#3B6FFF' }}
             >
               Connect <ExternalLink className="h-2.5 w-2.5" />
             </button>
@@ -169,7 +169,7 @@ export function SyncStatus() {
       {/* Auto-sync sources */}
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <span className="text-[11px] font-semibold text-[#b0b0c0] dark:text-[#4a4a60] tracking-[0.08em] uppercase">
             Synced
           </span>
           <Tooltip>
@@ -211,7 +211,7 @@ export function SyncStatus() {
         <div>
           <div className="mb-2 flex items-center gap-1.5">
             <Upload className="h-3 w-3 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <span className="text-[11px] font-semibold text-[#b0b0c0] dark:text-[#4a4a60] tracking-[0.08em] uppercase">
               Data Upload
             </span>
           </div>

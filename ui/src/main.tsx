@@ -29,7 +29,7 @@ const queryClient = new QueryClient({
 function ClerkTokenBridge() {
   const { getToken } = useAuth()
   useLayoutEffect(() => {
-    setClerkTokenGetter(() => getToken())
+    setClerkTokenGetter(() => getToken({ skipCache: true }))
   }, [getToken])
   return null
 }

@@ -64,30 +64,16 @@ def create_goal(
 
     protocol_resp = llm.invoke([
         SystemMessage(content=(
-            "You are a health protocol designer. Given a confirmed health goal, decide whether "
-            "it is 'simple' or 'complex', then generate the appropriate structure.\n\n"
+            "You are a health action designer. Given a confirmed health goal, generate 1-3 measurable actions.\n\n"
             f"Today: {today}. Active data sources: {active_sources}.\n\n"
-            "Use 'simple' when the goal maps to a single measurable metric with a clear numeric "
-            "target and no multi-step strategy is needed "
-            "(e.g. 'eat 30g fiber/day', 'drink 2L water/day', 'sleep 8h/night').\n"
-            "Use 'complex' when multiple interdependent actions are needed or the goal benefits "
-            "from a rationale or adaptive strategy "
-            "(e.g. 'increase bench press 1RM', 'lose 5kg body fat').\n\n"
             "Rules for actions:\n"
             "- Each action must be measurable against one of the active data sources.\n"
             "- metric must be one of: calories, protein_g, carbs_g, fat_g, fiber_g, "
             "workout_frequency, activity_frequency, running_frequency.\n"
-            "- Simple goals: 1 action. Complex goals: 2-3 actions.\n"
-            "- If insights exist, incorporate them into complex protocol rationale.\n"
-            "- For complex goals, review_date should be 4 weeks from today.\n\n"
+            "- Simple, single-metric goals need 1 action. Multi-faceted goals may have 2-3 actions.\n"
+            "- If insights exist, use them to inform action targets.\n\n"
             "Return only raw JSON. No markdown, no code fences, no commentary — just the JSON object.\n"
-            "Simple: "
-            '{"type": "simple", "actions": [{"action_text": "...", "metric": "...", '
-            '"condition": "less_than|greater_than|equals", '
-            '"target_value": <number>, "data_source": "...", "frequency": "daily|weekly"}]}\n'
-            "Complex: "
-            '{"type": "complex", "title": "3-6 word protocol name", "protocol_text": "...", "review_date": "YYYY-MM-DD", '
-            '"actions": [{"action_text": "...", "metric": "...", '
+            '{"actions": [{"action_text": "...", "metric": "...", '
             '"condition": "less_than|greater_than|equals", '
             '"target_value": <number>, "data_source": "...", "frequency": "daily|weekly"}]}'
         )),
@@ -95,7 +81,6 @@ def create_goal(
     ])
     try:
         content = str(protocol_resp.content)
-        # Extract JSON from markdown code fences if present; take the last block
         blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", content)
         if blocks:
             content = blocks[-1].strip()
@@ -106,8 +91,6 @@ def create_goal(
             goal_text, protocol_resp.content, exc,
         )
         return f"Failed to parse protocol response. LLM returned: {protocol_resp.content}"
-
-    goal_type = protocol_data.get("type", "complex")
 
     # Validate actions
     valid_metrics = {
@@ -165,16 +148,10 @@ def create_goal(
                 conflict_rows = conn.execute(
                     """
                     SELECT DISTINCT a.metric FROM actions a
+                    JOIN goals g ON g.id = a.goal_id
                     WHERE a.user_id = %s
                       AND a.metric = ANY(%s::text[])
-                      AND (
-                          EXISTS (SELECT 1 FROM goals g WHERE g.id = a.goal_id AND g.status = 'active')
-                          OR EXISTS (
-                              SELECT 1 FROM protocols p
-                              JOIN goals g ON p.goal_id = g.id
-                              WHERE p.id = a.protocol_id AND g.status = 'active'
-                          )
-                      )
+                      AND g.status = 'active'
                     """,
                     (user_id, proposed_metrics),
                 ).fetchall()
@@ -197,76 +174,39 @@ def create_goal(
                 return "Failed to create goal. Please try again."
             goal_id = goal_row["id"]
 
-            if goal_type == "simple":
-                # Direct actions — no protocol needed
-                inserted_actions = []
-                for a in actions:
-                    conn.execute(
-                        "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                        (goal_id, user_id, a["action_text"], a["metric"], a["condition"],
-                         a["target_value"], a["data_source"], a.get("frequency", "daily")),
-                    )
-                    inserted_actions.append(a)
-
-                action_summaries = "; ".join(
-                    f"{a['action_text']} (target: {a['condition'].replace('_', ' ')} {a['target_value']} {a['metric']}, {a.get('frequency', 'daily')})"
-                    for a in inserted_actions
+            # Insert actions directly under the goal
+            inserted_actions = []
+            for a in actions:
+                conn.execute(
+                    "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (goal_id, user_id, a["action_text"], a["metric"], a["condition"],
+                     a["target_value"], a["data_source"], a.get("frequency", "daily")),
                 )
-                return (
-                    f"Goal saved (id={goal_id}): {goal_text}. "
-                    f"Actions: {action_summaries}."
-                )
+                inserted_actions.append(a)
 
-            else:
-                # Complex goal — insert protocol then actions
-                protocol_title = protocol_data.get("title", "")
-                protocol_row = conn.execute(
-                    "INSERT INTO protocols (user_id, goal_id, insight_ids, title, protocol_text, start_date, review_date) "
-                    "VALUES (%s, %s, '[]'::jsonb, %s, %s, %s, %s) RETURNING id",
-                    (user_id, goal_id, protocol_title, protocol_data["protocol_text"], today, protocol_data["review_date"]),
-                ).fetchone()
-                if protocol_row is None:
-                    logger.error(
-                        "create_goal: INSERT protocols returned None. user_id=%s goal_id=%s",
-                        user_id, goal_id,
-                    )
-                    return "Failed to create protocol. Please try again."
-                protocol_id = protocol_row["id"]
-
-                inserted_actions = []
-                for a in actions:
-                    conn.execute(
-                        "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                        (protocol_id, user_id, a["action_text"], a["metric"], a["condition"],
-                         a["target_value"], a["data_source"], a.get("frequency", "daily")),
-                    )
-                    inserted_actions.append(a)
-
-                action_summaries = "; ".join(
-                    f"{a['action_text']} (target: {a['condition'].replace('_', ' ')} {a['target_value']} {a['metric']}, {a.get('frequency', 'daily')})"
-                    for a in inserted_actions
-                )
-                return (
-                    f"Goal saved (id={goal_id}): {goal_text}. "
-                    f"Protocol '{protocol_title}' created (id={protocol_id}), review date {protocol_data['review_date']}. "
-                    f"Actions: {action_summaries}."
-                )
+            action_summaries = "; ".join(
+                f"{a['action_text']} (target: {a['condition'].replace('_', ' ')} {a['target_value']} {a['metric']}, {a.get('frequency', 'daily')})"
+                for a in inserted_actions
+            )
+            return (
+                f"Goal saved (id={goal_id}): {goal_text}. "
+                f"Actions: {action_summaries}."
+            )
     except Exception:
         logger.exception(
-            "create_goal: unexpected error. user_id=%s goal_text=%r goal_type=%r",
-            user_id, goal_text, goal_type,
+            "create_goal: unexpected error. user_id=%s goal_text=%r",
+            user_id, goal_text,
         )
         raise
 
 
 @tool
 def get_goals() -> str:
-    """Return all goals with their protocols and actions.
-    Returns a JSON list of goals, each with nested protocols and actions."""
+    """Return all active goals and their actions.
+    Returns a JSON list of goals, each with a flat 'actions' list."""
     user_id = get_request_user_id()
-    return json.dumps(goals_analytics.get_goals_with_protocols_and_actions(user_id))
+    return json.dumps(goals_analytics.get_goals_with_actions(user_id))
 
 
 @tool
@@ -361,13 +301,11 @@ def get_insights() -> str:
 
 
 @tool
-def check_compliance(protocol_id: str = "") -> str:
-    """Check weekly compliance for active protocols and their actions.
-    Optionally pass a protocol_id to check only that protocol.
+def check_compliance() -> str:
+    """Check weekly compliance for all active goal actions.
     Returns a JSON summary of actual vs target values for each action this week."""
     user_id = get_request_user_id()
-    pid = int(protocol_id) if protocol_id.strip() else None
-    return json.dumps(compliance_analytics.run_compliance_check(user_id, protocol_id=pid))
+    return json.dumps(compliance_analytics.run_compliance_check(user_id))
 
 
 @tool
@@ -387,24 +325,6 @@ def update_goal_status(goal_id: str, status: str) -> str:
         return f"Goal {goal_id} not found."
     return json.dumps({"updated": True, "goal_id": int(goal_id), "status": status})
 
-
-@tool
-def assess_protocol(protocol_id: str, outcome: str) -> str:
-    """Mark a protocol as completed with an outcome assessment.
-    protocol_id: the protocol's numeric ID.
-    outcome: 'effective', 'ineffective', or 'inconclusive'."""
-    if outcome not in ("effective", "ineffective", "inconclusive"):
-        return f"Invalid outcome '{outcome}'. Must be 'effective', 'ineffective', or 'inconclusive'."
-    user_id = get_request_user_id()
-    with get_connection() as conn:
-        result = conn.execute(
-            "UPDATE protocols SET status = 'completed', outcome = %s, updated_at = NOW() "
-            "WHERE id = %s AND user_id = %s RETURNING id",
-            (outcome, int(protocol_id), user_id),
-        ).fetchone()
-    if not result:
-        return f"Protocol {protocol_id} not found."
-    return json.dumps({"updated": True, "protocol_id": int(protocol_id), "outcome": outcome})
 
 
 @tool

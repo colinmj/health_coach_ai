@@ -74,6 +74,25 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
             (week_start, week_start, user_id, prior_start, today),
         ).fetchone())
 
+        # Detect if the prior window predates all recorded data.
+        # COUNT() always returns 0 (never NULL), so wrk_prev=0 is ambiguous:
+        # it could mean "confirmed zero workouts" or "no data existed yet".
+        # MIN() resolves this: if the user's first workout is within the current
+        # window, the prior 0 means "no data" and should be treated as None.
+        _first = conn.execute(  # type: ignore[call-overload]
+            "SELECT MIN(start_time::date) AS first_date FROM hevy_workouts WHERE user_id = %s",
+            (user_id,),
+        ).fetchone()
+        _first_date_raw = _first["first_date"] if _first else None
+        _first_date: date | None = (
+            date.fromisoformat(_first_date_raw) if isinstance(_first_date_raw, str)
+            else _first_date_raw
+        )
+        wrk_prev_adjusted: int | None = (
+            None if (_first_date is None or _first_date >= week_start)
+            else wrk["wrk_prev"]
+        )
+
         # --- Nutrition ---
         nut = cast(dict[str, Any], conn.execute(  # type: ignore[call-overload]
             """
@@ -117,9 +136,9 @@ def build_trends_block(user_id: int, as_of: date | None = None) -> str:
         prev_str = f", prev {round(slp['slp_prev'], 1)}%" if slp["slp_prev"] is not None else ""
         lines.append(f"- Sleep performance: {round(slp['slp_now'], 1)}% {arrow}{prev_str}")
 
-    if wrk["wrk_now"] is not None and (wrk["wrk_now"] > 0 or wrk["wrk_prev"] > 0):
-        arrow = _arrow(wrk["wrk_now"], wrk["wrk_prev"])
-        prev_str = f", prev {wrk['wrk_prev']}" if wrk["wrk_prev"] is not None else ""
+    if wrk["wrk_now"] is not None and (wrk["wrk_now"] > 0 or (wrk_prev_adjusted is not None and wrk_prev_adjusted > 0)):
+        arrow = _arrow(wrk["wrk_now"], wrk_prev_adjusted)
+        prev_str = f", prev {wrk_prev_adjusted}" if wrk_prev_adjusted is not None else ""
         lines.append(f"- Workouts: {wrk['wrk_now']} this week {arrow}{prev_str}")
 
     if nut["prot_now"] is not None:

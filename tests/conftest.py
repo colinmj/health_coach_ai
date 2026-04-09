@@ -45,7 +45,7 @@ def db():
     conn.execute(
         "TRUNCATE hevy_sets, hevy_exercises, hevy_workouts, "
         "sleep, recovery, activities, body_measurements, nutrition_daily, "
-        "action_compliance, actions, protocols, goals, "
+        "action_compliance, actions, goals, "
         "sessions, messages, insights, user_integrations, user_data_imports, users CASCADE"
     )
 
@@ -176,7 +176,7 @@ def _seed(conn: psycopg.Connection) -> None:
     )
 
     # ------------------------------------------------------------------
-    # Goals, protocols, actions, insights
+    # Goals, actions, insights
     # ------------------------------------------------------------------
     goal_id = conn.execute(
         "INSERT INTO goals (user_id, raw_input, goal_text, domains, target_date) "
@@ -185,23 +185,16 @@ def _seed(conn: psycopg.Connection) -> None:
         (user_id,),
     ).fetchone()["id"]
 
-    protocol_id = conn.execute(
-        "INSERT INTO protocols (user_id, goal_id, insight_ids, protocol_text, start_date, review_date) "
-        "VALUES (%s, %s, '[]'::jsonb, 'Train bench press 3x per week and eat high protein', "
-        "'2024-01-01', '2024-02-01') RETURNING id",
-        (user_id, goal_id),
-    ).fetchone()["id"]
-
     action1_id = conn.execute(
-        "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+        "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
         "VALUES (%s, %s, 'Lift at least 3x per week', 'workout_frequency', 'greater_than', 2, 'hevy', 'weekly') RETURNING id",
-        (protocol_id, user_id),
+        (goal_id, user_id),
     ).fetchone()["id"]
 
     action2_id = conn.execute(
-        "INSERT INTO actions (protocol_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
+        "INSERT INTO actions (goal_id, user_id, action_text, metric, condition, target_value, data_source, frequency) "
         "VALUES (%s, %s, 'Eat at least 160g protein per day', 'protein_g', 'greater_than', 160, 'cronometer', 'daily') RETURNING id",
-        (protocol_id, user_id),
+        (goal_id, user_id),
     ).fetchone()["id"]
 
     conn.execute(
@@ -232,7 +225,6 @@ def _seed(conn: psycopg.Connection) -> None:
         "user_id": user_id,
         "goal_id": goal_id,
         "goal2_id": goal2_id,
-        "protocol_id": protocol_id,
         "action1_id": action1_id,
         "action2_id": action2_id,
         "direct_action_id": direct_action_id,

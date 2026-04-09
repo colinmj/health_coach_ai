@@ -67,7 +67,6 @@ function InsightCard({ insight }: { insight: Insight }) {
 function GoalCard({ goal }: { goal: Goal }) {
   const [confirming, setConfirming] = useState(false)
   const queryClient = useQueryClient()
-  const protocolCount = goal.protocols.length
 
   const { mutate: remove, isPending } = useMutation({
     mutationFn: () => deleteGoal(goal.id),
@@ -88,9 +87,9 @@ function GoalCard({ goal }: { goal: Goal }) {
                 Due {format(new Date(goal.target_date), 'MMM d, yyyy')}
               </Badge>
             )}
-            {protocolCount > 0 && (
+            {goal.actions.length > 0 && (
               <span className="text-xs text-muted-foreground">
-                {protocolCount} protocol{protocolCount !== 1 ? 's' : ''}
+                {goal.actions.length} action{goal.actions.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>

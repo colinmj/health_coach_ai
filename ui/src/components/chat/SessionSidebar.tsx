@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PenSquare, MessageCircle, Pin, X } from 'lucide-react'
+import { MessageCircle, Pin, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 import { SyncStatus } from './SyncStatus'
@@ -62,11 +62,17 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
       )}
     >
       <div className="flex items-center justify-between px-4 py-4">
-        <span className="text-sm font-semibold text-sidebar-foreground">Sessions</span>
+        <span className="text-[11px] font-semibold text-[#b0b0c0] dark:text-[#4a4a60] tracking-[0.08em] uppercase">Sessions</span>
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" onClick={handleNewChat} title="New chat">
-            <PenSquare className="h-4 w-4" />
-          </Button>
+          <button
+            className="w-6 h-6 rounded-md bg-transparent border border-[#E0E0E8] dark:border-[#2a2a3a] text-[#b0b0c0] dark:text-[#6b6b80]
+              hover:border-[#3B6FFF] hover:text-[#3B6FFF] transition-all duration-150
+              flex items-center justify-center text-sm"
+            onClick={handleNewChat}
+            title="New chat"
+          >
+            +
+          </button>
           {isMobile && (
             <Button size="icon" variant="ghost" onClick={onClose} title="Close">
               <X className="h-4 w-4" />
@@ -88,7 +94,7 @@ export function SessionSidebar({ isMobile, open, onClose }: SessionSidebarProps)
 
         {pinnedSessions.length > 0 && (
           <>
-            <p className="px-3 pb-1 pt-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="px-3 pb-1 pt-1 text-[11px] font-semibold text-[#b0b0c0] dark:text-[#4a4a60] tracking-[0.08em] uppercase">
               Pinned
             </p>
             {pinnedSessions.map((session) => (
@@ -148,15 +154,17 @@ function SessionRow({ session, isActive, onSelect, onDeleted }: SessionRowProps)
         }
       }}
       className={cn(
-        'group flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-        'hover:bg-sidebar-accent cursor-pointer',
-        isActive && 'bg-sidebar-accent',
+        'group flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all duration-150',
+        'border-l-2 cursor-pointer',
+        isActive
+          ? 'bg-[#F0F0F8] dark:bg-[#1C1C27] border-l-[#3B6FFF]'
+          : 'border-l-transparent hover:bg-[#F0F0F8] dark:hover:bg-[#1C1C27]',
       )}
     >
       <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1 truncate font-medium text-sidebar-foreground">
+        <div className={cn('flex items-center gap-1 truncate font-medium', isActive ? 'text-foreground' : 'text-[#505068] dark:text-[#c8c8d8]')}>
           {session.pinned && (
             <Pin className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Pinned" />
           )}
