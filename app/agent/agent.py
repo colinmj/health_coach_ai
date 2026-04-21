@@ -544,6 +544,12 @@ async def astream_run(
                             if tc.get("name") and key not in announced:
                                 announced.add(key)
                                 yield {"type": "tool_start", "name": tc["name"]}
+                                _tool_tokens = {
+                                    "create_goal": "Saving your goal...",
+                                }
+                                if tc["name"] in _tool_tokens:
+                                    tokens_yielded_this_attempt = True
+                                    yield {"type": "token", "text": _tool_tokens[tc["name"]]}
                         # Stream text tokens
                         if isinstance(chunk.content, str) and chunk.content:
                             tokens_yielded_this_attempt = True

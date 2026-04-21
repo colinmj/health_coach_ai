@@ -179,6 +179,8 @@ export function MessageList() {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    console.log(messages)
+
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isStreaming])
 

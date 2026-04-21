@@ -9,23 +9,23 @@ pip install -r requirements.txt
 ## Syncing data
 ```bash
 # Hevy (workouts)
-python -m sync.hevy
+PYTHONPATH=app python -m sync.hevy
 
 # Whoop (recovery, sleep, HRV)
-python -m sync.whoop
+PYTHONPATH=app python -m sync.whoop
 
 # Withings (body composition)
-python -m sync.withings
+PYTHONPATH=app python -m sync.withings
 
 # Cronometer (nutrition) — export Daily Summary CSV from the app first
-python -m sync.cronometer path/to/dailysummary.csv
-#python -m sync.cronometer ~/Downloads/dailysummary.csv
+PYTHONPATH=app python -m sync.cronometer path/to/dailysummary.csv
+#PYTHONPATH=app python -m sync.cronometer ~/Downloads/dailysummary.csv
 ```
 
 ## Auth (if tokens are missing/expired)
 ```bash
-python -m sync.whoop_auth
-python -m sync.withings_auth
+PYTHONPATH=app python -m sync.whoop_auth
+PYTHONPATH=app python -m sync.withings_auth
 ```
 
 ## API server
@@ -33,7 +33,7 @@ python -m sync.withings_auth
 ```bash
 # Terminal 1 — activate venv first
 source .venv/bin/activate
-uvicorn api.main:app --reload
+PYTHONPATH=app uvicorn api.main:app --reload
 # → http://localhost:8000
 ```
 
@@ -51,18 +51,17 @@ Vite proxies `/api/*` → `http://localhost:8000`, so both must be running.
 ## RAG / Knowledge base
 ```bash
 # Ingest a PDF or URL into the knowledge base
-python -m sync.documents path/to/file.pdf "Document Name"
-python -m sync.documents https://example.com/article "Document Name"
+PYTHONPATH=app python -m sync.documents path/to/file.pdf "Document Name"
+PYTHONPATH=app python -m sync.documents https://example.com/article "Document Name"
 ```
 
 ## Agent
 ```bash
 # Interactive prompt
-python -m agent.agent
+PYTHONPATH=app python -m agent.agent
 
 # Inline question
-python -m agent.agent "how did my sleep affect my lifting this week?"
-"
+PYTHONPATH=app python -m agent.agent "how did my sleep affect my lifting this week?"
 ```
 
 ## Database

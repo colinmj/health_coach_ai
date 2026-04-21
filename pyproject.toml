@@ -1,3 +1,6 @@
+[tool.pytest.ini_options]
+pythonpath = ["app"]
+
 [tool.mypy]
 ignore_missing_imports = true
 disable_error_code = ["line-too-long"]

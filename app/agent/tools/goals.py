@@ -78,7 +78,7 @@ def create_goal(
             '"target_value": <number>, "data_source": "...", "frequency": "daily|weekly"}]}'
         )),
         HumanMessage(content=f"Goal: {goal_text}\nActive insights: {insights_text}"),
-    ])
+    ], config={"callbacks": []})
     try:
         content = str(protocol_resp.content)
         blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", content)
