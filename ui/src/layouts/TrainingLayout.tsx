@@ -6,6 +6,7 @@ import { getProfile } from '@/lib/api'
 const TRAINING_SUB_NAV = [
   { to: '/training/form-analyzer', label: 'Form Analyzer' },
   { to: '/training/workout-builder', label: 'Workout Builder' },
+  { to: '/training/physique', label: 'Physique' },
 ]
 
 function NavItem({ to, label }: { to: string; label: string }) {

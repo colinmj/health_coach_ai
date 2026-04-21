@@ -7,6 +7,7 @@ from api.routers import stripe as stripe_router
 from api.routers import user as user_router
 from api.routers import workout_builder as workout_builder_router
 from api.routers import manual_workout as manual_workout_router
+from api.routers import progress_photos as progress_photos_router
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ app.include_router(stripe_router.router)
 app.include_router(user_router.router)
 app.include_router(workout_builder_router.router)
 app.include_router(manual_workout_router.router)
+app.include_router(progress_photos_router.router)
 
 
 @app.get("/health")

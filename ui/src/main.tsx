@@ -13,6 +13,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { FormCheckPage } from './pages/FormCheckPage'
 import { WorkoutBuilderPage } from './pages/WorkoutBuilderPage'
 import { ManualWorkoutPage } from './pages/ManualWorkoutPage'
+import { PhysiquePage } from './pages/PhysiquePage'
 import { TrainingLayout } from './layouts/TrainingLayout'
 import { useAuthStore } from './stores/authStore'
 import { useThemeStore } from './stores/themeStore'
@@ -91,6 +92,7 @@ createRoot(document.getElementById('root')!).render(
                               <Route path="form-analyzer" element={<FormCheckPage />} />
                               <Route path="workout-builder" element={<WorkoutBuilderPage />} />
                               <Route path="manual-log" element={<ManualWorkoutPage />} />
+                              <Route path="physique" element={<PhysiquePage />} />
                             </Route>
                           </Route>
                         </Route>

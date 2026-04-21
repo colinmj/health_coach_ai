@@ -408,3 +408,47 @@ export async function deleteManualWorkout(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/manual-workout/${id}`, { method: 'DELETE' })
   if (!res.ok && res.status !== 204) throw new Error('Failed to delete workout')
 }
+
+// Progress Photos
+export interface ProgressPhoto {
+  id: number
+  url: string
+  taken_at: string
+  notes: string | null
+  created_at: string
+}
+
+export async function uploadProgressPhoto(
+  file: File,
+  takenAt?: string,
+  notes?: string,
+): Promise<{ photo_id: number; taken_at: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  if (takenAt) form.append('taken_at', takenAt)
+  if (notes) form.append('notes', notes)
+  const res = await apiFetch(`${BASE}/progress-photos/`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail ?? 'Upload failed')
+  }
+  return res.json()
+}
+
+export interface ProgressPhotosPage {
+  total: number
+  page: number
+  page_size: number
+  photos: ProgressPhoto[]
+}
+
+export async function deleteProgressPhoto(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/progress-photos/${id}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 204) throw new Error('Failed to delete photo')
+}
+
+export async function getProgressPhotos(page = 1): Promise<ProgressPhotosPage> {
+  const res = await apiFetch(`${BASE}/progress-photos/?page=${page}`)
+  if (!res.ok) throw new Error('Failed to fetch progress photos')
+  return res.json()
+}

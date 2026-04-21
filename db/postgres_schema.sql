@@ -601,6 +601,20 @@ ALTER TABLE insights ADD COLUMN IF NOT EXISTS title TEXT;
 
 
 -- -----------------------------------------------------------------------------
+-- Progress Photos
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS progress_photos (
+    id          SERIAL      PRIMARY KEY,
+    user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    r2_key      TEXT        NOT NULL,
+    taken_at    TIMESTAMPTZ NOT NULL,
+    notes       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_progress_photos_user_taken ON progress_photos (user_id, taken_at DESC);
+
+
+-- -----------------------------------------------------------------------------
 -- Views  (scoped to user_id — app layer always filters by user_id)
 -- -----------------------------------------------------------------------------
 

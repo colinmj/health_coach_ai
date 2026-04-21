@@ -60,14 +60,10 @@ Guidelines:
 
 
 def _get_form_standards(exercise_name: str, conn) -> str:
-    """Return form standards text from the knowledge base, or a generic fallback."""
-    doc_name = f"form_standards_{exercise_name}"
-    rows = conn.execute(
-        "SELECT content FROM document_chunks WHERE document_name = %s ORDER BY chunk_index",
-        (doc_name,),
-    ).fetchall()
-    if rows:
-        return "\n\n".join(row["content"] for row in rows)
+    """
+    Return form standards text from the knowledge base, or a generic fallback.
+    Rag to come in later release - return Generic Standards for now
+    """
     return _GENERIC_STANDARDS
 
 
